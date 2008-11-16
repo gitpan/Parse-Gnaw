@@ -1,0 +1,19 @@
+Revision history for Parse-Gnaw
+
+0.20    2008-11-16
+
+First version, released on an unsuspecting world.
+
+Took the package "Gnaw" and renamed it "Parse::Gnaw".
+Massive rewrite to a state-machine based design.
+Massive changes to reduce the amount of text used
+to define grammmars. Still need to do some major 
+work on text markers so they're more stable.
+Currently have some problems when we try something
+like
+	get(sub{print'x'}, a('alice', 'bob'))
+
+This is a BETA release.
+
+
+

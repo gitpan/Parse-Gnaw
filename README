@@ -1,0 +1,222 @@
+Parse-Gnaw
+
+
+Gnaw is a perl module which implements full regular expressions and 
+full text parsing grammars using nothing but pure perl code limited 
+to subroutine closures, exception trapping via eval, and basic perl 
+variables such as scalars, hashes, and arrays. 
+
+Parse::Gnaw does not use regular expressions under the hood.
+
+You write your grammar in pure perl. There is no intermediate 
+"parser language" that then gets interpreted into something executable.
+
+When you do a "use Parse::Gnaw", the Gnaw module will import a 
+number of functions directly into your namespace. Yes, this is 
+completely bad form for normal modules. But this is not a normal 
+module. The imported subroutines include regular expression and 
+parsing functions for matching, quantifiers, literals, 
+alternations, character classes, and so on. You build up your 
+grammar by calling these functions. The final call will return 
+a code reference. This code reference is your grammar.
+
+When you dereference that grammar, if it is a "match" function, 
+then you pass in the string you want to parse.
+
+	use Parse::Gnaw;
+
+	# create the grammar
+	my $grammar = match('hello');
+
+	# apply the grammar to a string
+	if($grammar->('hello world')) {
+		print "match\n";
+	} else {
+		print "no match";
+	}
+
+You can also create the grammar and execute it in one step:
+
+	my $texttoparse = "howdy partner";
+
+	if(match('hello', 'world')->($texttoparse)) {
+		print "match\n";
+	} else {
+		print "no match\n";
+	}
+
+Note the above example translated into perls regular expression syntax 
+would look something like this:
+
+	my $texttoparse = "howdy partner";
+
+	if($texttoparse =~ m{hello\s*world}) {
+		print "match\n";
+	} else {
+		print "no match\n";
+	}
+
+You can build up more complicated grammars fairly easily.
+This one looks for a sentence about fruit.
+
+	$grammar = match(
+			ql('I would like to buy'), 
+			some('a', qa('banana apple pear peach')
+	));
+
+	
+	if($grammar->('yes, we have no bananas today')) {
+		print "match\n";
+	} else {
+		print "no match\n";
+	}
+
+More complicated grammars can be handled by breaking up the grammar
+into subroutines which act as rules. Here's an example of a somewhat
+complex grammar using subroutines for subrules:
+
+
+	sub trekname { qa('Jim Captain Spock Bones Doctor Scotty') } 
+
+	sub occupation {a('ditch digger', 'bricklayer', 'mechanic')}
+	sub mccoy_job { [ql("I'm a doctor, not a"), occupation, a('!', '.')] }
+	sub mccoy_diag { [ "He's", 'dead', ',', trekname, a('!', '.') ] }
+	sub mccoy_rant1 { [ql('You green-blooded Vulcan'), a('!', '.') ] }
+
+	sub mccoy_isms { a(mccoy_job, mccoy_diag, mccoy_rant1) }
+
+	sub spock_awe {['Fascinating', ',', trekname, '.']}
+	sub spock_logic {['Highly', 'illogical',',', trekname, '.']}
+	sub spock_sensors { [ql("It's life ,"), trekname, ql(', but not as we know it .')]}
+
+	sub spock_isms {a(spock_awe, spock_logic, spock_sensors)}
+
+	sub kirk_dipolomacy1 {ql('We come in peace .')}
+	sub kirk_dipolomacy2 {ql('Shoot to kill .')}
+	sub kirk_to_scotty {ql('I need warp speed now, Scotty !')}
+	sub kirk_to_spock {ql('What is it , Spock ?')}
+	sub kirk_to_bones {ql('Just fix him , Bones')}
+	sub kirk_solution {ql('Activate ship self-destruct mechanism .')}
+
+	sub kirk_isms {a(
+		kirk_dipolomacy1, 
+		kirk_dipolomacy2,
+		kirk_to_scotty,
+		kirk_to_spock,
+		kirk_to_bones,
+		kirk_solution
+	)}
+
+	sub time_units {qa('minutes hours days weeks')}
+	sub scotty_phy101 {ql('Ya kenna change the laws of physics .')}
+	sub scotty_estimate {[ ql("I'll have it ready for you in three"), time_units, '.' ]}
+
+	sub scotty_isms { a(scotty_phy101, scotty_estimate) }
+
+	sub alien_isms {'weeboo'}
+
+	sub trek_isms {a(mccoy_isms, spock_isms, kirk_isms, scotty_isms, alien_isms )}
+
+	sub trek_screenplay {some(trek_isms)}
+
+	$grammar = parse(  trek_screenplay );
+
+
+Given the grammar in the above example, you could create some text 
+and see if it follows the trek screenplay format this way:
+
+
+	my $script = <<'SCRIPT';
+
+		What is it, Spock?
+		It's life, Jim, but not as we know it.
+		We come in peace.
+		weeboo
+		Shoot to kill.
+		weeboo
+		I need warp speed now, Scotty!
+		I'll have it ready for you in three minutes.
+		weeboo
+		I need warp speed now, Scotty!
+		Ya kenna change the laws of physics.
+		weeboo
+		weeboo
+		Shoot to kill.
+		Shoot to kill.
+		I'm a doctor, not a bricklayer.
+		Highly illogical, Doctor.
+		You green-blooded Vulcan.
+		Shoot to kill.
+		Shoot to kill.
+		He's dead, Jim.
+		Activate ship self-destruct mechanism.
+		Highly illogical, Captain.
+
+	SCRIPT
+	;
+
+
+	$grammar->( $script )
+
+And so on.
+
+See the pod for more information.
+
+	perldoc Parse::Gnaw
+
+
+BETA RELEASE
+
+Please note that this is a BETA RELEASE. 
+
+It is still a work in progress and the entire package is subject 
+to change at any time.
+
+When I believe I've got a package that does everything, 
+I'll make an production release, non-Beta release, of Parse::Gnaw 
+The rev number will probably be 1.0 or greater for a 
+production release.
+
+Until a production release is available, please do not
+use Parse::Gnaw to generate large massive complex grammars,
+only to have the nuts and bolts under the hood change on you later.
+
+
+INSTALLATION
+
+To install this module, run the following commands:
+
+	perl Makefile.PL
+	make
+	make test
+	make install
+
+SUPPORT AND DOCUMENTATION
+
+After installing, you can find documentation for this module with the
+perldoc command.
+
+    perldoc Parse::Gnaw
+
+You can also look for information at:
+
+    RT, CPAN's request tracker
+        http://rt.cpan.org/NoAuth/Bugs.html?Dist=Parse-Gnaw
+
+    AnnoCPAN, Annotated CPAN documentation
+        http://annocpan.org/dist/Parse-Gnaw
+
+    CPAN Ratings
+        http://cpanratings.perl.org/d/Parse-Gnaw
+
+    Search CPAN
+        http://search.cpan.org/dist/Parse-Gnaw
+
+
+COPYRIGHT AND LICENCE
+
+Copyright (C) 2008 Greg London
+
+This program is free software; you can redistribute it and/or modify it
+under the same terms as Perl itself.
+
