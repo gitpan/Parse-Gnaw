@@ -2,7 +2,7 @@
 1; 
 { 
 package Parse::Gnaw; 
-our $VERSION = '0.20'; 
+our $VERSION = '0.21'; 
 }  
 1;
 
@@ -10,12 +10,14 @@ use warnings;
 use strict;
 use Data::Dumper; 
 
+#use Parse::Gnaw::Decomment;
 
+### die "you just uncommented this die statement";
 
 # these two subroutines are used to turn on/off debugging info
-sub GNAWMONITOR {} 
+sub GNAWMONITOR_0 {}  
 
-sub GNAWMONITOR_0  {
+sub GNAWMONITOR  {
 	print "MONITOR: "; 
 
 	# if user passes in a message, print it
@@ -41,11 +43,25 @@ sub GNAWMONITOR_0  {
 	print "line ".$linenum."\n";
 }
 
+sub __gnaw__whereami {
+	print "whereami\n";
+	my $iter=0;
+	my @caller = caller($iter++);
 
+	while(scalar(@caller)) {
+		# print Dumper \@caller;
+		my($pkg,$file,$lnum,$func)=@caller;
+		print "whereami sub $func called from $lnum in file $file\n";
+		@caller = caller($iter++);
+	}
+
+}
 
 sub __gnaw__die {
 	my ($message)=@_;
-	my $location = __gnaw__string_showing_user_current_location_in_text();
+	my $location='';
+	$location .= __gnaw__whereami;
+	$location .= __gnaw__string_showing_user_current_location_in_text();
 	my $string = $message . "\n" . $location;
 
 	die $string;
@@ -706,10 +722,11 @@ to hold whatever matched the "get" function.
 
 	> name is 'Alice'
 
-If you call the grammar multiple times to parse different strings,
-or if your grammar gets more than one match while it parses,
-the scalar reference only holds the last match.
-
+If your grammar gets more than one match while it parses,
+the scalar reference only holds the last match. If you use the
+same grammar to parse different strings, scalars are initialized
+to whatever value they held when the grammar was generated, and
+this value is overwritten only if a match occurs.
 
 	my $name;
 
@@ -723,7 +740,9 @@ the scalar reference only holds the last match.
 	> name is 'Charlie'
 
 If the first parameter is an array reference, then every match
-by the "get" function will get pushed into the array. 
+by the "get" function will get pushed into the array. If you call
+the same grammar multiple times, the array is emptied at the start
+of parsing. Note this behaviour is different from scalars.
 
 	my @name;
 
@@ -743,24 +762,10 @@ call this subroutine on every match and pass in as the first parameter
 the value of the string that matched. You may then do whatever you
 wish with this string inside the subroutine you define.	
 
-Note that the parser will call the subroutine at the beginning of
-parsing to allow you to initialize anything. You can detect the
-initialization phase by the fact that @_ is empty. If you do not 
-need to initialize anything, simply insert the following as the first 
-line in your subroutine. 
-
-	return unless(scalar(@_))
-
-Here is an example of "get" using a subroutine reference.
-
 	my $name = sub{
-		if(scalar(@_)==0) {
-			# open a file, etc
-		} else {
-			my ($string) = @_;
-			# write $string to a file, or whatever
-			print "called subroutine, received '$string'\n";
-		}
+		my ($string) = @_;
+		# write $string to a file, or whatever
+		print "called subroutine, received '$string'\n";
 	};
 
 	$grammar = match('hello', get($name, some(ccword)), '!' );
@@ -774,6 +779,33 @@ The remaining parameters of the "get" function are one or more
 grammar components. Literals, character classes, alternations, 
 quantifiers, array refs used for grouping sequences of grammar
 components, etc.
+
+The "get" function can be nested, like nested capturing parens
+in perl regular expressions.
+
+	my ($g1, $g2, $g3, $g4, $g5, $g6, $g7, $g8);
+
+	$grammar = parse( 
+		get(\$g8,
+			get(\$g1, get(\$g2, thing), get(\$g3, thing) ),
+			get(\$g4, get(\$g5, thing), get(\$g6, thing), get(\$g7, thing) ),
+		) 
+	
+	);
+
+	$grammar->('abcdefghijklmnop');
+	
+	ok($g2 eq 'a', "g2");
+	ok($g3 eq 'b', "g3");
+	ok($g1 eq 'ab', "g1");
+	ok($g5 eq 'c', "g5");
+	ok($g6 eq 'd', "g6");
+	ok($g7 eq 'e', "g7");
+	ok($g4 eq 'cde', "g4");
+	ok($g8 eq 'abcde', "g8");
+	
+Translating the "get" function to use a callback that writes the results to the
+proper perl regexp variables of $1, $2, $3 is left as an exercise for the reader.
 
 =head2 now versus defer
 
@@ -867,6 +899,142 @@ previous text from memory.
 
 	$grammar = match(some('keyword', commit, 'blah', 'blah', 'blah'));
 
+=head1 EXAMPLES
+
+=head2 trekisms
+
+The following grammar shows how one might identify dialogue and 
+attribute it to a particular fictional character. 
+
+The "attributeline" subroutine allowed us to bundle the functionality
+of the output into one spot and then easily use that functionality 
+at several different points in the grammar.
+
+	my $captured="";
+
+	sub attributeline { 
+		my ($name, $restofgrammar) = @_;
+		my $callback = sub{$captured.=sprintf ("%8s says: %s\n", $name,shift(@_));};
+		my $stitcher = get($callback, $restofgrammar);
+		return $stitcher;
+	}
+
+	sub trekname { qa('Jim Captain Spock Bones Doctor Scotty') } 
+	sub occupation {a('ditch digger', 'bricklayer', 'mechanic')}
+	sub mccoy_job { [ql("I'm a doctor, not a"), occupation, a('!', '.')] }
+	sub mccoy_diag { [ "He's", 'dead', ',', trekname, a('!', '.') ] }
+	sub mccoy_rant1 { [ql('You green-blooded Vulcan'), a('!', '.') ] }
+	sub mccoy_isms {
+		attributeline('McCoy', a(mccoy_job, mccoy_diag, mccoy_rant1)) 
+	}
+
+	sub spock_awe {['Fascinating', ',', trekname, '.']}
+	sub spock_logic {['Highly', 'illogical',',', trekname, '.']}
+	sub spock_sensors { [ql("It's life ,"), trekname, ql(', but not as we know it .')]}
+	sub spock_isms {
+		attributeline('Spock', a(spock_awe, spock_logic, spock_sensors))
+	}
+	
+	sub kirk_dipolomacy1 {ql('We come in peace .')}
+	sub kirk_dipolomacy2 {ql('Shoot to kill .')}
+	sub kirk_to_scotty {ql('I need warp speed now, Scotty !')}
+	sub kirk_to_spock {ql('What is it , Spock ?')}
+	sub kirk_to_bones {ql('Just fix him , Bones')}
+	sub kirk_solution {ql('Activate ship self-destruct mechanism .')}
+	sub kirk_isms {
+		attributeline('Kirk', a(
+			kirk_dipolomacy1, 
+			kirk_dipolomacy2,
+			kirk_to_scotty,
+			kirk_to_spock,	
+			kirk_to_bones,	
+			kirk_solution
+		))
+	}
+
+	sub scotty_phy101 {ql('Ya kenna change the laws of physics .')}
+	sub time_units {qa('minutes hours days weeks')}
+	sub scotty_estimate {[ ql("I'll have it ready for you in three"), time_units, '.' ]}
+	
+	sub scotty_isms {attributeline('Scotty', a(scotty_phy101, scotty_estimate))}
+	
+	
+	sub alien_isms {attributeline('alien', 'weeboo')}
+	
+	
+	sub trek_isms {a(mccoy_isms, spock_isms, kirk_isms, scotty_isms, alien_isms )}
+	sub trek_script {some(trek_isms)}	
+	
+	$grammar = parse(  trek_script );
+		
+	my $script = <<'SCRIPT';
+	What is it, Spock?
+	It's life, Jim, but not as we know it.
+	We come in peace.
+	weeboo
+	Shoot to kill.
+	weeboo
+	I need warp speed now, Scotty!
+	I'll have it ready for you in three minutes.
+	weeboo
+	I need warp speed now, Scotty!
+	Ya kenna change the laws of physics.	
+	weeboo
+	weeboo
+	Shoot to kill.
+	Shoot to kill.
+	I'm a doctor, not a bricklayer.
+	Highly illogical, Doctor.
+	You green-blooded Vulcan.
+	Shoot to kill.
+	Shoot to kill.
+	He's dead, Jim.
+	Activate ship self-destruct mechanism.
+	Highly illogical, Captain.
+	SCRIPT
+	;
+
+	#print "script is '$script'\n";
+
+	ok($grammar->( $script )==1, "1 match");
+
+	my $expected =  <<'EXPECTED';
+	    Kirk says: What is it, Spock?
+	   Spock says: It's life, Jim, but not as we know it.
+	    Kirk says: We come in peace.
+	   alien says: weeboo
+	    Kirk says: Shoot to kill.
+	   alien says: weeboo
+	    Kirk says: I need warp speed now, Scotty!
+	  Scotty says: I'll have it ready for you in three minutes.
+	   alien says: weeboo
+	    Kirk says: I need warp speed now, Scotty!
+	  Scotty says: Ya kenna change the laws of physics.
+	   alien says: weeboo
+	   alien says: weeboo
+	    Kirk says: Shoot to kill.
+	    Kirk says: Shoot to kill.
+	   McCoy says: I'm a doctor, not a bricklayer.
+	   Spock says: Highly illogical, Doctor.
+	   McCoy says: You green-blooded Vulcan.
+	    Kirk says: Shoot to kill.
+	    Kirk says: Shoot to kill.
+	   McCoy says: He's dead, Jim.
+	    Kirk says: Activate ship self-destruct mechanism.
+	   Spock says: Highly illogical, Captain.
+	EXPECTED
+	;
+	
+		
+	
+	ok($captured eq $expected, "checking captured string matches expected");
+
+The above example is included as a test in the t directory of the tarball from CPAN.
+
+	
+=head1 NOT IMPLEMENTED YET
+
+
 
 =head2 recursive
 
@@ -903,44 +1071,42 @@ the "recursive" function.
 
 
 =cut 
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
-#####################################################################
-#####################################################################
-#####################################################################
-#####################################################################
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
-#####################################################################
-#####################################################################
-#####################################################################
-#####################################################################
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
-#####################################################################
-#####################################################################
-#####################################################################
-#####################################################################
-
-
-
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 
-####################################################################
-####################################################################
-####################################################################
-# text is linked list to allow adding new and removing old
-####################################################################
-####################################################################
-####################################################################
-# text to parse is a linked list.
 
-sub __GNAW__PREV {0;}
 
-sub __GNAW__NEXT {1;}
+sub __GNAW__WHAT {0;} # what kind of element is this  
 
-sub __GNAW__LETTER {2;}
+sub __GNAW__PAYLOAD {1;} 
 
-# this is always the last element.
-# we use this in several for loops to do things to an element.
-sub __GNAW__LOCATION_MARKERS {3;}
+sub __GNAW__NEXT {2;}
+
+sub __GNAW__PREV {3;}
+
+sub __GNAW__DEBUG {4;} # use this only during debug mode, contains debug string to describe element
+
+sub __GNAW__DELETE_WHAT { 0; } # element has been deleted, removed from linked list
+sub __GNAW__LETTER_WHAT { 1; } # element holds a text letter
+sub __GNAW__MARKER_WHAT { 2; } # element is a marker
+sub __GNAW__CLLBCK_WHAT { 3; } # element holds a callback
+sub __GNAW__HEADER_WHAT { 4; } # element is a head/tail point
+
 
 
 
@@ -952,193 +1118,291 @@ our $__gnaw__tail_text_element    ;
 our $__gnaw__curr_text_element ;  
 
 
-##################################################################### text linked list markers
-##################################################################### explaining "markers" to text in linked list.
-# sometimes we might want to remember where we are in the text linked list.
-# such as in a "capture" command, so we can remember start of capture.
-# however, as text is consumed, the text being pointed to may no longer exist.
-# so, rather than just making a copy of the current pointer, we create a "marker".
-# a marker is a pointer to a pointer. 
-# When we want a text marker, we create a scalar, then we initilize that scalar
-# to be a reference to the current text element. then we return a reference to 
-# that scalar. The scalar exists in the heap because it is declared by "my" in
-# the "get new marker", but a reference to it is returned, so it isn't garbage
-# collected. 
-# it might be nice to make the marker a hash so we can store info in it, but 
-# that might create a lot of memory overhead and slow execution down.
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# explaining "markers" to text in linked list.
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# text is a linked list. Each element is a letter.
+# Markers are inserted into the linked list as new elements in between
+# the text elements. We can then jump back to an old marker by jumping
+# back to a reference to the element.
+# 
+# hello world
+# h-e-l-l-o- -w-o-r-l-d
+# start parsing, set a marker BEFORE first character
+# say its for an alternation function.
+# (marker1)-h-e-l-l-o- -w-o-r-l-d
+# move forward to 'w' in world
+# set another marker there, say for a "get" function.
+# (marker1)-h-e-l-l-o- -(marker2)-w-o-r-l-d
+# continue parsing
+# parse fails, fallback position is the (marker1)
+# alternation may decide to keep marker in place
+# to try another alternate.
+# meanwhile, (marker2) still exists but is meaningless since it
+# was from an interpretation that failed.
 #
-# note that to do any operation on a marker, a scalar must be passed in as the
-# first parameter. This will be the marker. this will help us make sure there
-# are no old markers laying around.
-####################################################################
-
-# receive a marker and return a pointer to the text element in linked list being pointed to
-# using a sub call in case I want to change how markers work.
-sub __gnaw__text_element_pointed_to_by_marker {
-	my $markerref = $_[0];
-
-	GNAWMONITOR($markerref);
-	unless(defined($markerref)) {
-		return undef;
-	}
-
-	if(ref($markerref) eq 'CODE') {
-		print "ERROR: called __gnaw__text_element_pointed_to_by_marker and didn't pass it a marker\n";
-		print "Instead of a marker, a code reference was passed in.\n";
-		die;
-	}
-
-	# individual text elements are arrays.
-	# elements are chained together as a linked list.
-	if(ref($$markerref) eq 'ARRAY') {
-		return $$markerref;
-	} 
-
-	print "ERROR: called __gnaw__text_element_pointed_to_by_marker and passed it a reference to something not a marker\n";
-	print Dumper $markerref;
-	die "ERROR: bad text marker";
-	return undef;
-
-}
-
-our $__gnaw__universal_undefined_scalar;
-
-sub __gnaw__have_marker_point_to_element {
-	my ($markerref, $element) = @_;
-
-	if(defined($element)) {
-		$$markerref = $element;
-	} else {
-		undef $$markerref;
-		$$markerref = $__gnaw__universal_undefined_scalar;
-	}
-}
+# As we move current position forward, delete any meta-elements we come across.
+# since they can only exist from a failed interpretation, we can delete them
+# as we move forward.
+#
+# code-wise, what are markers?
+#
+# When code requests a marker, it may request a marker either
+# before the current position or after it.
+#
+# If a rule is starting a capture, it hasn't read any text yet,
+# so the marker would go *before* the current position.
+# If a rule completes a capture, the rules have parsed the current
+# text position and have probably moved the pointer forward to 
+# the next character, therefore the end marker would be inserted
+# *before* the current pointer.
+#
+# Most functions should insert their markers just before the 
+# current position. But each requester will have to figure out 
+# if they want a marker before or after the current letter.
+#
+# when requesting a marker, the code will insert an element before/after
+# the current location and return a reference to that element.
+# 
+# fallback won't cause the marker to be deleted. That will be the
+# responsibility of whoever generated the fallback position in the first place.
+#
+# if someone requests that a marker be deleted, it will be removed from
+# the linked list and it's "what" marker will be set to "deleted".
+# It won't be removed from memory until perl's garbage collection 
+# claims it. This means that if somehow an old pointer to the marker
+# is used for anything, it will come back as "deleted". 
+#
+# The alternative is that we force a deletion of the element
+# and any pointers to that element suddenly point to random data in the heap
+# that's probably not good.
+# 
+# Will try to properly account for all references, but keeping them
+# around will be a backup plan to prevent accidentally using an old marker.
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 
-sub __gnaw__get_current_text_marker {
-	GNAWMONITOR;
+# if you pass in a code ref payload, I'll return a marker that is a callback.
+# if you pass in any other payload, I'll assume its a letter and make this a letter element.
+# if you don't pass in any payload, I'll return a plain marker.
+sub __gnaw__create_new_element_before_or_aftern_this_element { # ($before_or_aftern, $thiselement, $typenum, $payload?) 
+	########GNAWMONITOR;
+	my $before_or_aftern = shift(@_);
+	my $thiselement      = shift(@_);
+	my $typenum          = shift(@_);
 
-	my $marker;
-	$marker = $__gnaw__curr_text_element;
 
-	my $markerref = \$marker;
+	my $firstelement;
+	my $lastelement;
 
-	push(@$__gnaw__curr_text_element, $markerref);
-	
+	########GNAWMONITOR(__gnaw__string_showing_user_current_location_in_text());
 
-	# if caller passed us an old marker, garbage collect it.
-	if(defined($_[0])) {
-		__gnaw__garbage_collect_old_marker($_[0]);
-	}
+	my $newelement = [];
+	########GNAWMONITOR("newelement is '$newelement'");
 
-	# we don't return the marker, we get it via @_
-	$_[0] = $markerref;
-
-	# use a hard coded return to make sure we don't return the result
-	# of the last operation.
-	return; 
-}
-
-sub __gnaw__garbage_collect_old_marker {
-	my ($markerref) = @_;
-
-	unless(defined($markerref)) {
-		GNAWMONITOR("tried to garbage collect an undefined marker");
-		return;
-	}
-
-	my $textelement = __gnaw__text_element_pointed_to_by_marker($markerref);
-
-	GNAWMONITOR("garbage collect marker: marker is at $markerref");
-	GNAWMONITOR("garbage collect marker: text element is at $textelement");
-
-	my $size_of_array = scalar(@$textelement);
-
-	for(my $iter=__GNAW__LOCATION_MARKERS; $iter<$size_of_array; $iter++) {
-		if($markerref eq $textelement->[$iter]) {
-			# splice ( ARRAY , OFFSET , LENGTH , LIST );
-			# The elements in ARRAY starting at OFFSET and 
-			# going for LENGTH indexes will be removed from ARRAY. 
-			# Any elements from LIST will be inserted at OFFSET into ARRAY.
-
-			splice(@$textelement, $iter, 1);
-			return;
+	######## __gnaw__whereami;
+	if($before_or_aftern == 1) {
+		# BEFORE
+		if($thiselement eq $__gnaw__head_text_element) {
+			__gnaw__die("tried to insert marker before head element");
 		}
+
+		$firstelement = $thiselement->[__GNAW__PREV];
+		$lastelement = $thiselement;
+
+		########GNAWMONITOR("firstelement is '$firstelement'");
+		########GNAWMONITOR("lastelement is '$lastelement'");
+
+	} else {
+		# AFTER
+		if($thiselement eq $__gnaw__tail_text_element) {
+			__gnaw__die("tried to insert marker after tail element");
+		}
+	
+		$firstelement = $thiselement;
+		$lastelement = $thiselement->[__GNAW__NEXT];
+
+		########GNAWMONITOR("firstelement is '$firstelement'");
+		########GNAWMONITOR("lastelement is '$lastelement'");
 	}
 
-	# if we fell through, we didn't find it.
-	return;
+	$newelement->[__GNAW__WHAT] = $typenum;
+
+	if($typenum==__GNAW__LETTER_WHAT) {
+		my $payload = shift(@_);
+		$newelement->[__GNAW__PAYLOAD] = $payload;
+
+		########GNAWMONITOR("added letter '$payload' to linked list");
+
+		# if we just inserted a text element before the tail element
+		# and the current text pointer points to the tail element,
+		# then move current text pointer to the element we just inserted.
+		if(	($thiselement eq $__gnaw__tail_text_element) 
+			and ($__gnaw__curr_text_element eq $__gnaw__tail_text_element)
+		) {
+			$__gnaw__curr_text_element = $newelement;
+			########GNAWMONITOR("current text was pointing to tail element. moved to '$newelement'");
+		}
+
+	} elsif($typenum==__GNAW__MARKER_WHAT) {
+		$newelement->[__GNAW__WHAT] = __GNAW__MARKER_WHAT;
+		########GNAWMONITOR("added marker to linked list");
+
+	} elsif($typenum==__GNAW__CLLBCK_WHAT) {
+		my $payload = shift(@_);
+		$newelement->[__GNAW__PAYLOAD] = $payload;
+		########GNAWMONITOR("added callback to linked list");
+	} else {
+		__gnaw__die("tried to create a text element with an unknown typenum, '$typenum'");
+	}
+
+	# during debug mode, if we pass in a string describing the element,
+	# attach it to the element so we know who created what in the list.
+	######## 
+	######## if(scalar(@_)) {
+	######## 	my $debugstring = shift(@_);
+	######## 	$newelement->[__GNAW__DEBUG] = $debugstring;
+	######## }
+	######## 
+
+	$firstelement->[__GNAW__NEXT]=$newelement;
+	$newelement->[__GNAW__PREV]=$firstelement;
+
+	$newelement->[__GNAW__NEXT]=$lastelement;
+	$lastelement->[__GNAW__PREV]=$newelement;
+
+
+	########GNAWMONITOR(__gnaw__string_showing_user_current_location_in_text());
+
+	return $newelement;
+}
+
+# if you pass in a code ref payload, I'll return a marker that is a callback.
+# if you pass in any other payload, I'll assume its a letter and make this a letter element.
+# if you don't pass in any payload, I'll return a plain marker.
+sub __gnaw__create_new_element_before_this_element { # ($thiselement, $typenum, $payload?)
+	########GNAWMONITOR;
+	return __gnaw__create_new_element_before_or_aftern_this_element(1,@_);
+}
+
+# if you pass in a code ref payload, I'll return a marker that is a callback.
+# if you pass in any other payload, I'll assume its a letter and make this a letter element.
+# if you don't pass in any payload, I'll return a plain marker.
+sub __gnaw__create_new_element_after_this_element { # ($thiselement, $typenum, $payload?)
+	########GNAWMONITOR;
+	return __gnaw__create_new_element_before_or_aftern_this_element(0,@_);
 }
 
 
-sub __gnaw__restore_old_text_marker {
-	my ($markerref) = @_;
-	unless(defined($markerref)) {
-		GNAWMONITOR("tried to restore an undefined marker");
+sub __gnaw__create_new_element_before_current_element { # ($typenum, $payload?)
+	########GNAWMONITOR;
+	return __gnaw__create_new_element_before_this_element($__gnaw__curr_text_element, @_);		
+}
+
+sub __gnaw__create_new_element_after_current_element { # ($typenum, $payload?)
+	########GNAWMONITOR;
+	return __gnaw__create_new_element_after_this_element($__gnaw__curr_text_element, @_);		
+}
+
+
+sub __gnaw__create_new_marker_before_current_element { # might pass in a debug string
+	########GNAWMONITOR;
+	return __gnaw__create_new_element_before_current_element(__GNAW__MARKER_WHAT , @_);		
+}
+
+sub __gnaw__create_new_marker_after_current_element { #  might pass in a debug string
+	########GNAWMONITOR;
+	return __gnaw__create_new_element_after_current_element( __GNAW__MARKER_WHAT, @_);		
+}
+
+
+# remove the marker from the linked list and 
+# reattach the linked list elements around the marker.
+# remove the contents of the marker array.
+# set the "what" element to indicate this is a deleted marker.
+sub __gnaw__delete_this_text_element { # (this element) return next element after deleted one
+	########GNAWMONITOR;
+	my ($marker) = @_;
+
+	########GNAWMONITOR(__gnaw__string_describing_single_text_element($marker));
+
+	unless(defined($marker)) {
+		########GNAWMONITOR("tried to garbage collect an undefined marker");
 		return;
 	}
 
-	my $textelement = __gnaw__text_element_pointed_to_by_marker($markerref);
+	unless(ref($marker) eq 'ARRAY') {
+		########GNAWMONITOR("tried to garbage collect something tht didn't poitn to a marker");
+		return;
+	}
+
+	my $firstelement = $marker->[__GNAW__PREV];
+	my $lastelement = $marker->[__GNAW__NEXT];
+
+	$firstelement->[__GNAW__NEXT]=$lastelement;
+	$lastelement->[__GNAW__PREV]=$firstelement;
+
+	# if current text pointer is pointing at the element we're deleting, we need to point to something valid. point to the next element.
+	if($__gnaw__curr_text_element eq $marker) {
+		$__gnaw__curr_text_element = $lastelement;
+	}
+
+	@$marker=(__GNAW__DELETE_WHAT);  # works because __GNAW__WHAT is zero.
+	return $lastelement;
+}
+
+
+sub __gnaw__text_element_is_valid { # (textelement)
+	my($textelement)=@_;
 
 	unless(defined($textelement)) {
-		GNAWMONITOR("tried to restore a marker to undefined textelement");
+		__gnaw__die("tried to use an undefined text element");
 		return;
 	}
 
-	GNAWMONITOR("restore old marker: marker is at $markerref");
-	GNAWMONITOR("restore old  marker: text element is at $textelement");
+	unless(ref($textelement) eq 'ARRAY') {
+		__gnaw__die("tried to use a text element that was not an array reference");
+		return;
+	}
 
-	$__gnaw__curr_text_element = $textelement;
+	if($textelement->[__GNAW__WHAT] == __GNAW__DELETE_WHAT) {
+		__gnaw__die("tried to use a text element marked as previously deleted (". __gnaw__string_describing_single_text_element($textelement) . ")" );
+		return;
+	}
 
-	__gnaw__garbage_collect_old_marker( $markerref );
+	return;
+}
 
-	__gnaw__delete_all_markers_and_callbacks_at_text_position($__gnaw__curr_text_element);
+sub __gnaw__restore_old_text_marker {
+	my ($textmarker) = @_;
+
+	__gnaw__text_element_is_valid($textmarker);
+	$__gnaw__curr_text_element = $textmarker;
 
 	return;
 }
 
 
 
-##################################################################### callbacks are associated with the text element of the current element
-####################################################################
-sub __gnaw__assign_callback_to_current_text_element {
-	GNAWMONITOR;
 
-	my ($coderef)=@_;
-
-	push(@$__gnaw__curr_text_element, $coderef);
-	
-}
-
-
-sub __gnaw__call_all_callbacks_from_beginning_to_current_element {
-	GNAWMONITOR("__gnaw__call_all_callbacks_from_beginning_to_current_element BEGIN");
+sub __gnaw__call_all_callbacks_from_beginning_to_current_element { # including current element if it is a callback
+	########GNAWMONITOR("__gnaw__call_all_callbacks_from_beginning_to_current_element BEGIN");
 
 	my $curr = $__gnaw__head_text_element;
 
 	# while still looking
 	my $still_looking=1;
 	while ($still_looking) {
+		if($curr->[__GNAW__WHAT] == __GNAW__CLLBCK_WHAT) {
+			my $callback = $curr->[__GNAW__PAYLOAD];
 
-		# if this element has some references at the end
-		if(scalar(@$curr)>(__GNAW__LOCATION_MARKERS)) {
+			########GNAWMONITOR("aaaaaa call_all_callbacks found callback '$callback'\n");
+			$callback->();
+			########GNAWMONITOR("zzzzzz\n");
 
-			# take the references off and put them in @refs array
-			my @refs = splice(@$curr, __GNAW__LOCATION_MARKERS);
-
-			# while there are refs in @refs array
-			while(scalar(@refs)) {
-
-				#get a ref
-				my $ref = pop(@refs);
-
-				# if ref is not a callback, must be a marker, put it back 
-				if(ref($ref) ne 'CODE') {
-					push(@$curr, $ref);
-				} else { # else must be a call back, call it.
-					$ref->();
-				}
-			}
+			my $callelement = $curr;
+			$curr = $callelement->[__GNAW__NEXT];
+			__gnaw__delete_this_text_element($callelement);
 		}
 
 		if($curr eq $__gnaw__curr_text_element) {
@@ -1150,57 +1414,19 @@ sub __gnaw__call_all_callbacks_from_beginning_to_current_element {
 
 	}
 
-	GNAWMONITOR("__gnaw__call_all_callbacks_from_beginning_to_current_element END");
-
+	########GNAWMONITOR("__gnaw__call_all_callbacks_from_beginning_to_current_element END");
+	return;
 }
 
-# this assumes there are no callbacks on element.
-sub __gnaw__delete_all_markers_from_beginning_to_current_element {
-	GNAWMONITOR("__gnaw__delete_all_markers_from_beginning_to_current_element BEGIN");
 
-	my $curr = $__gnaw__head_text_element;
-	my $next;
-	my $still_looking=1;
-	while ($still_looking) {
-
-		# while this element has some references at the end
-		#while(scalar(@$curr)>(__GNAW__LOCATION_MARKERS)) {
-		#	#get a ref
-		#	my $ref = pop(@$curr);
-		#	$$ref = \$__gnaw__universal_undefined_scalar;
-		#}
-
-		__gnaw__delete_all_markers_and_callbacks_at_text_position($curr);
-
-
-		if( 	   ($curr eq $__gnaw__curr_text_element) 
-			or ($curr eq $__gnaw__tail_text_element) ) 
-		{
-			$still_looking=0;
-		} else {
-			# now go to next element
-			$next = $curr->[__GNAW__NEXT];
-
-			#@$curr = ();
-
-			$curr = $next;
-		}
-
-
-	}
-
-	GNAWMONITOR("__gnaw__delete_all_markers_from_beginning_to_current_element END");
-
-}
-
-# this assumes you've already called any callbacks and deleted any markers.
+# this assumes you've already called any callbacks
 sub __gnaw__delete_all_elements_from_beginning_to_just_prior_to_current_element {
-	GNAWMONITOR("__gnaw__delete_all_elements_from_beginning_to_just_prior_to_current_element BEGIN");
+	########GNAWMONITOR("__gnaw__delete_all_elements_from_beginning_to_just_prior_to_current_element BEGIN");
 	my $count;
 
 	# starting from current location,
 	# back up to the beginning of the line.
-	# don't go past 100 characters
+	# don't go more than 10 characters
 	# and don't go past the beginning marker.
 	my $stop = $__gnaw__curr_text_element;
 	$count = 10;
@@ -1216,7 +1442,8 @@ sub __gnaw__delete_all_elements_from_beginning_to_just_prior_to_current_element 
 	while ($curr ne $stop) {
 		$next = $curr->[__GNAW__NEXT];
 
-		@$curr = ();
+		# delete any references in element. set the "what" element to deleted.
+		@$curr = (__GNAW__DELETE_WHAT);
 
 		$curr = $next;
 	}
@@ -1224,58 +1451,49 @@ sub __gnaw__delete_all_elements_from_beginning_to_just_prior_to_current_element 
 	$__gnaw__head_text_element->[__GNAW__NEXT] = $stop;
 	$stop->[__GNAW__PREV] = $__gnaw__head_text_element;
 
-	GNAWMONITOR("__gnaw__delete_all_elements_from_beginning_to_just_prior_to_current_element END");
-
+	########GNAWMONITOR("__gnaw__delete_all_elements_from_beginning_to_just_prior_to_current_element END");
+	return;
 }
 
 
 sub __gnaw__commit_text_to_current_location {
-	GNAWMONITOR;
+	########GNAWMONITOR;
 	__gnaw__call_all_callbacks_from_beginning_to_current_element();
-	__gnaw__delete_all_markers_from_beginning_to_current_element();
 	__gnaw__delete_all_elements_from_beginning_to_just_prior_to_current_element();
+	return;
 }
 
-
-
-##################################################################### text linked list handling subroutines.
-####################################################################
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# text linked list handling subroutines.
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 sub __gnaw__initialize_text_linked_list_to_empty {
-	GNAWMONITOR;
+	########GNAWMONITOR;
 
 	# if the text linked list currently has data in it, 
-	# go through and delete all the data and delete all the markers
+	# go through and delete everything in list
 	if(defined($__gnaw__head_text_element)) {
 		my $element = $__gnaw__head_text_element;
 		while(defined($element)) {
 			my $next = $element->[__GNAW__NEXT];
-			splice(@$element, 0, __GNAW__LOCATION_MARKERS);
-
-			my $markerref;
-			while(scalar(@$element)) {
-				$markerref = shift(@$element);
-				__gnaw__have_marker_point_to_element($markerref, undef);
-			}
+			@$element=();
 			undef $element;
 			$element = $next;
 		}
 
 	}
 
-
 	$__gnaw__head_text_element = [];
 	$__gnaw__tail_text_element = [];
 
-	# the location markers go at the end of the array.
-	# will push them on only as needed.
-
+	$__gnaw__head_text_element->[__GNAW__WHAT]	= __GNAW__HEADER_WHAT;
 	$__gnaw__head_text_element->[__GNAW__PREV]	= undef;
 	$__gnaw__head_text_element->[__GNAW__NEXT]	= $__gnaw__tail_text_element;
-	$__gnaw__head_text_element->[__GNAW__LETTER]	= '';
+	$__gnaw__head_text_element->[__GNAW__PAYLOAD]	= '';
 
+	$__gnaw__tail_text_element->[__GNAW__WHAT]	= __GNAW__HEADER_WHAT;
 	$__gnaw__tail_text_element->[__GNAW__PREV]	= $__gnaw__head_text_element;
 	$__gnaw__tail_text_element->[__GNAW__NEXT]	= undef;
-	$__gnaw__tail_text_element->[__GNAW__LETTER]	= '';
+	$__gnaw__tail_text_element->[__GNAW__PAYLOAD]	= '';
 
 	# we will initialize to pointing to tail element.
 	# when we add text, if curr pointer is pointing to tail element, then we will
@@ -1287,151 +1505,62 @@ sub __gnaw__initialize_text_linked_list_to_empty {
 
 __gnaw__initialize_text_linked_list_to_empty();
 
-sub __gnaw__insert_letter_just_before_marker {
-	my ($letter, $marker)=@_;
-
-	GNAWMONITOR("__gnaw__insert_letter_just_before_marker letter is '$letter', marker is '$marker'"); ;
-
-	my $oldelement = __gnaw__text_element_pointed_to_by_marker($marker);
-
-	unless(defined($oldelement)) {
-		GNAWMONITOR("tried to __gnaw__insert_letter_just_before_marker but marker pointed to undef");
-		return;
-	}
-
-	GNAWMONITOR( "__gnaw__insert_letter_just_before_marker oldelement is '$oldelement'\n");
-
-	my $newelement = [];
-
-	$newelement->[__GNAW__LETTER]=$letter;
-
-	# get pointer to previous element
-	my $prevelement = $oldelement->[__GNAW__PREV];
-
-	$prevelement->[__GNAW__NEXT] = $newelement;
-	$newelement->[__GNAW__PREV] = $prevelement;
-
-	$newelement->[__GNAW__NEXT] = $oldelement;
-	$oldelement->[__GNAW__PREV] = $newelement;
-
-	# if marker pointed to last element and last element has location markers, 
-	# then move them into this character we just added.
-	if($oldelement eq $__gnaw__tail_text_element) {
-		my @temparray = @$__gnaw__tail_text_element;
-
-		# use splice so we can change number of indexes between zero and 
-		# location markers and still work.
-		splice(@temparray, 0, __GNAW__LOCATION_MARKERS);
-	
-		while(scalar(@temparray)) {
-			my $markerref = shift(@temparray);
-			__gnaw__have_marker_point_to_element($markerref,$newelement);
-		}
-
-		# if currently pointing to the tail element, 
-		# move pointer to the element we just inserted
-		if($__gnaw__curr_text_element eq $__gnaw__tail_text_element) {
-			$__gnaw__curr_text_element = $newelement;
-		}
-	}
-	return;
-}
-
-sub __gnaw__insert_letter_at_end_of_linked_list {
-	my ($letter)=@_;
-	GNAWMONITOR("__gnaw__insert_letter_at_end_of_linked_list inserting '$letter'");
-	my $endmarker = \$__gnaw__tail_text_element;
-	GNAWMONITOR( "__gnaw__tail_text_element is '$__gnaw__tail_text_element'. endmarker is '$endmarker'\n");
-	__gnaw__insert_letter_just_before_marker($letter, $endmarker);
-}
-
-
-sub __gnaw__insert_string_just_before_marker {
-	GNAWMONITOR;
-	my ($string, $marker) = @_;
-
-	my @letters = split(//, $string);
-
-	foreach my $letter (@letters) {
-		GNAWMONITOR(  "__gnaw__insert_string_just_before_marker letter '$letter' at marker '$marker'\n" );
-		__gnaw__insert_letter_just_before_marker($letter, $marker);
-	}
-}
-
-sub __gnaw__insert_string_at_end_of_linked_list {
+sub __gnaw__insert_string_at_end_of_linked_list { #(string)
 	my ($string) = @_;
-	GNAWMONITOR("__gnaw__insert_string_at_end_of_linked_list inserting string '$string'");
+	########GNAWMONITOR("__gnaw__insert_string_at_end_of_linked_list inserting string '$string'");
 
 	my @letters = split(//, $string);
 
 	foreach my $letter (@letters) {
-		__gnaw__insert_letter_at_end_of_linked_list($letter);
+		__gnaw__create_new_element_before_this_element($__gnaw__tail_text_element, __GNAW__LETTER_WHAT, $letter
+			######## , 'from __gnaw__insert_string_at_end_of_linked_list'
+		);
 	}
 
 }
 
 
-sub __gnaw__delete_this_element_in_text_linked_list {
-	my ($element)=@_;
-	GNAWMONITOR("__gnaw__delete_this_element_in_text_linked_list $element");
+sub __gnaw__insert_string_just_before_marker { #(string, marker)
+	my ($string,$marker) = @_;
+	########GNAWMONITOR("__gnaw__insert_string_at_end_of_linked_list inserting string '$string'");
 
-	return if($element eq $__gnaw__head_text_element);
-	return if($element eq $__gnaw__tail_text_element);
+	my @letters = split(//, $string);
 
-	my $prev = $element->[__GNAW__PREV];
-	my $next = $element->[__GNAW__NEXT];
-
-	$prev->[__GNAW__NEXT] = $next;
-	$next->[__GNAW__PREV] = $prev;
-
-	# now that we've got the prev, next, and letter, delete them from array
-	# the only thing left will be markers.
-	# use splice so we can change number of indexes between zero and 
-	# location markers and still work.
-	splice(@$element, 0, __GNAW__LOCATION_MARKERS);
-
-	# if there are any markers in current element, delete them
-	while(scalar(@$element)) {
-		my $markerref = shift(@$element);
-		__gnaw__have_marker_point_to_element($markerref,undef);
+	foreach my $letter (@letters) {
+		__gnaw__create_new_element_before_this_element($marker, __GNAW__LETTER_WHAT, $letter
+			######## , 'from __gnaw__insert_string_just_before_marker'
+		);
 	}
-
-}	
-
+}
 
 
-
-
-####################################################################
-####################################################################
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 # some higher level subroutines for string manipulation
-####################################################################
-####################################################################
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
-sub __gnaw__read_string_between_markers {
-	GNAWMONITOR ( "__gnaw__read_string_between_markers" );
-	my($startmarker, $stopmarker) = @_;
+# assuming start and stop elements are both markers that don't hold text.
+# returned string will not include either endpoint markers, start or stop.
+sub __gnaw__read_string_between_markers { # (startelement, stopelement)
+	########GNAWMONITOR ( "__gnaw__read_string_between_markers" );
+	my($startelement, $stopelement) = @_;
 
-	GNAWMONITOR("startmarker is '$startmarker'");
-	GNAWMONITOR("stopmarker is '$stopmarker'");
+	__gnaw__text_element_is_valid($startelement);
+	__gnaw__text_element_is_valid($stopelement);
 
-	my $startelement = __gnaw__text_element_pointed_to_by_marker($startmarker);
-	my $stopelement = __gnaw__text_element_pointed_to_by_marker($stopmarker);
-
-	GNAWMONITOR("startelement is '$startelement'");
-	GNAWMONITOR("stopelement is '$stopelement'");
-
-	unless(defined($startelement) and defined($stopelement)) {
-		return '';
-	}
+	########GNAWMONITOR("startelement is '$startelement'");
+	########GNAWMONITOR("stopelement is '$stopelement'");
 
 	my $string = '';
 
-	my $element = $startelement;
+	my $element = $startelement->[__GNAW__NEXT];
 
-	while( defined($element) and ($element ne $stopelement) ) {
-		my $letter = $element->[__GNAW__LETTER];
-		$string .= $letter;
+	while( ($element ne  $__gnaw__tail_text_element) and ($element ne $stopelement) ) {
+		if($element->[__GNAW__WHAT] == __GNAW__LETTER_WHAT) {
+			my $letter = $element->[__GNAW__PAYLOAD];
+			$string .= $letter;
+		}
 		$element = $element->[__GNAW__NEXT];
 	}
 
@@ -1439,52 +1568,43 @@ sub __gnaw__read_string_between_markers {
 }
 
 
-# note "start" marker element will be deleted. "stop" element will not.
-sub __gnaw__delete_string_between_markers {
-	GNAWMONITOR ( "__gnaw__delete_string_between_markers" );
-	my($startmarker, $stopmarker) = @_;
+# note neither marker start/stop will be deleted.
+sub __gnaw__delete_string_between_markers { # (startelement, stopelement)
+	########GNAWMONITOR ( "__gnaw__delete_string_between_markers" );
+	my($startelement, $stopelement) = @_;
 
-	GNAWMONITOR("startmarker is '$startmarker'");
-	my $startelement = __gnaw__text_element_pointed_to_by_marker($startmarker);
-	GNAWMONITOR("startelement is '$startelement'");
+	__gnaw__text_element_is_valid($startelement);
+	__gnaw__text_element_is_valid($stopelement);
 
+	########GNAWMONITOR("startelement is '$startelement'");
+	########GNAWMONITOR("stopelement is '$stopelement'");
 
-	GNAWMONITOR("stopmarker is '$stopmarker'");
-	my $stopelement = __gnaw__text_element_pointed_to_by_marker($stopmarker);
-	GNAWMONITOR("stopelement is '$stopelement'");
+	my $element = $startelement->[__GNAW__NEXT];
 
-	unless(defined($startelement) and defined($stopelement)) {
-		return;
-	}
-
-	my $element = $startelement;
-
-	while( defined($element) and ($element ne $stopelement) ) {
-		my $next = $element->[__GNAW__NEXT];
-		__gnaw__delete_this_element_in_text_linked_list($element);
-		$element=$next;
+	while( ($element ne  $__gnaw__tail_text_element) and ($element ne $stopelement) ) {
+		$element = __gnaw__delete_this_text_element($element);
 	}
 
 	return;
 }
 
 
-sub __gnaw__replace_text_between_markers_with_string {
-	GNAWMONITOR ( "__gnaw__replace_text_between_markers_with_string" );
+sub __gnaw__replace_text_between_markers_with_string { #(startmarker, stopmarker, string)
+	########GNAWMONITOR ( "__gnaw__replace_text_between_markers_with_string" );
 	my($startmarker, $stopmarker, $string) = @_;
 	__gnaw__delete_string_between_markers($startmarker, $stopmarker);
 	__gnaw__insert_string_just_before_marker($string, $stopmarker); 
 	return;
 }
 
-####################################################################
-####################################################################
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 # low level parsing subroutines.
-####################################################################
-####################################################################
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
-sub __gnaw__at_end_of_string {
-	GNAWMONITOR;
+sub __gnaw__at_end_of_input_text { # return boolean
+	########GNAWMONITOR;
 	if($__gnaw__curr_text_element eq $__gnaw__tail_text_element) {
 		return 1;
 	} else { 
@@ -1492,59 +1612,65 @@ sub __gnaw__at_end_of_string {
 	}
 }
 
-sub __gnaw__move_pointer_forward {
-	GNAWMONITOR;
-	if(__gnaw__at_end_of_string()) {
+
+sub __gnaw__move_pointer_forward { # move forward to first text element. delete anything in front of us
+	########GNAWMONITOR ("MOVE POINTER FORWARD, CHECKING END OF INPUT");
+	if(__gnaw__at_end_of_input_text()) {
+		########GNAWMONITOR ("MOVE POINTER FORWARD, AT END PARSE FAILED");
 		__gnaw__parse_failed();
 		return;
 	}
+	########GNAWMONITOR ("MOVE POINTER FORWARD, getting next");
 	$__gnaw__curr_text_element = $__gnaw__curr_text_element->[__GNAW__NEXT];
 
-	__gnaw__delete_all_markers_and_callbacks_at_text_position($__gnaw__curr_text_element);
+	# delete any element that is not a letter. markers, callbacks, etc. all go
+	# move forward to first letter element.
+	while(	
+		    ($__gnaw__curr_text_element ne $__gnaw__tail_text_element) 
+		and ($__gnaw__curr_text_element->[__GNAW__WHAT] != __GNAW__LETTER_WHAT)
+	) {
+		$__gnaw__curr_text_element = __gnaw__delete_this_text_element($__gnaw__curr_text_element);
+	}
+	return;
 }	
 
-sub __gnaw__delete_all_markers_and_callbacks_at_text_position {
-	# as we move forward, we may attach markers and callbacks to the text
-	# if we fallback to an earlier position, we don't delete all the existing
-	# markers and callbacks, because we may not get as far. 
-	# instead, we'll only delete them as we need.
-	# when we move the text pointer forward here, we are guaranteed that no
-	# opcode has put a marker on this text yet. Any markers there now are old
-	# markers and can be deleted.
-	#
-	# short version: delete everything in array from index __GNAW__LOCATION_MARKERS to end
-	my($textelement) = @_;
 
-	return unless(defined($textelement));
-	unless(defined($textelement)) {
-		my $cnt=0;
-		while(1) {
-			my @caller = caller($cnt++);
-			if(scalar(@caller)==0) {exit;}
-			warn; print Dumper \@caller;
-		}
+sub __gnaw__curr_character { # return current character in text linked list
+	########GNAWMONITOR;
+	if(__gnaw__at_end_of_input_text()) {
+		__gnaw__parse_failed();
+		return 'FAIL';
 	}
 
-	delete @$textelement[ __GNAW__LOCATION_MARKERS .. (scalar(@$textelement)-1) ];
+	if($__gnaw__curr_text_element->[__GNAW__WHAT] != __GNAW__LETTER_WHAT) {
+		__gnaw__die("tried to call __gnaw__curr_character, but current text element no longer pointing at a letter element");
+	}
 
+	return $__gnaw__curr_text_element->[__GNAW__PAYLOAD];
 }
 
-####################################################################
+
+
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 # Note: if you create your own "skip" subroutine, make sure it doesn't
 # use the __gnaw__curr_character routine because the __gnaw__curr_character 
 # will call the "skip" subroutine, and things will go kersplewy.
-####################################################################
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 our $__gnaw__skip_whitespace = sub{
-####################################################################
-	GNAWMONITOR('skipwhitespace');
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+	########GNAWMONITOR('skipwhitespace');
 
 	while(1) {
+		########GNAWMONITOR('skipwhitespace while 1');
+		########GNAWMONITOR('skipwhitespace about to test end of input text');
+		if(__gnaw__at_end_of_input_text()) {
+			########GNAWMONITOR('skipwhitespace at end of input text');
 
-		if(__gnaw__at_end_of_string()) {
 			return;
 		}
+		########GNAWMONITOR('skipwhitespace not at end of input text');
 
-		my $letter =  $__gnaw__curr_text_element->[__GNAW__LETTER];
+		my $letter =  __gnaw__curr_character;
 
 		if(
 			($letter eq ' ' ) or
@@ -1552,6 +1678,7 @@ our $__gnaw__skip_whitespace = sub{
 			($letter eq "\n") or
 			($letter eq "\f")
 		) {
+			########GNAWMONITOR('skipwhitespace trying to move pointer forward');
 			__gnaw__move_pointer_forward();
 		} else {
 			return;
@@ -1560,33 +1687,85 @@ our $__gnaw__skip_whitespace = sub{
 	}
 };
 
-####################################################################
-our $__gnaw__skip_nothing = sub{};
-####################################################################
 
-####################################################################
+
+
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+our $__gnaw__skip_nothing = sub{};
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 # change the coderef assigned to this to change what we skip.
 # probably want to do it with a "local" command.
-####################################################################
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 our $__gnaw__skip_code = $__gnaw__skip_whitespace;
-####################################################################
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
-sub __gnaw__curr_character {
-	GNAWMONITOR;
-	if(__gnaw__at_end_of_string()) {
-		__gnaw__parse_failed();
-		return '';
+sub __gnaw__string_describing_single_text_element { # pass in text element, return string description of element
+	my ($curr)=@_; 
+
+	unless(defined($curr)) {
+		return "-----reference is undefined--------\n";
 	}
 
-	return $__gnaw__curr_text_element->[__GNAW__LETTER];
+	my $final_string ='';
+
+	if($curr eq $__gnaw__curr_text_element) {
+		$final_string.= ">>>";
+	} else {
+		$final_string.= "   ";
+	}
+
+	$final_string .= $curr." ";
+
+	if ($curr->[__GNAW__WHAT] == __GNAW__LETTER_WHAT) {
+		my $letter = $curr->[__GNAW__PAYLOAD];
+
+		   if($letter eq "\n") { $letter = '\\n'; }
+		elsif($letter eq "\t") { $letter = '\\t'; }
+		else {$letter = ' '.$letter; }
+			$final_string.= $letter;
+	} else {
+		$final_string .= '  ';
+	}
+
+	$final_string.= " : ";
+
+	if($curr eq $__gnaw__head_text_element) {
+		$final_string.= "HEAD     ";
+	} elsif ($curr eq $__gnaw__tail_text_element){
+		$final_string.= "TAIL     ";
+	} elsif ($curr->[__GNAW__WHAT] == __GNAW__DELETE_WHAT) {
+		$final_string.= "!DELETED!";
+	} elsif ($curr->[__GNAW__WHAT] == __GNAW__LETTER_WHAT) {
+		$final_string.= "letter   ";
+	} elsif ($curr->[__GNAW__WHAT] == __GNAW__MARKER_WHAT) {
+		$final_string.= "MARKER   ";
+	} elsif ($curr->[__GNAW__WHAT] == __GNAW__CLLBCK_WHAT) {
+		$final_string.= "CALLBACK ";
+	} elsif ($curr->[__GNAW__WHAT] == __GNAW__HEADER_WHAT) {
+		$final_string.= "header   ";
+	} else {
+		$final_string .= "unknown id number(".($curr->[__GNAW__WHAT]);
+	}
+
+	if ($curr->[__GNAW__WHAT] == __GNAW__CLLBCK_WHAT) {
+		$final_string .= " ".($curr->[__GNAW__PAYLOAD]);
+	}
+
+	my $debug_string = $curr->[__GNAW__DEBUG];
+	if(defined($debug_string)) {
+		$final_string .= " ".$debug_string;
+	}
+
+	$final_string.= "\n";
+
+	return $final_string;
 }
 
 
-
-
-
-sub __gnaw__string_showing_user_current_location_in_text {
-	GNAWMONITOR;
+sub __gnaw__string_showing_user_current_location_in_text { # return string dump of text linked list
+	########GNAWMONITOR;
 	my $count;
 
 	# starting from current location,
@@ -1595,13 +1774,17 @@ sub __gnaw__string_showing_user_current_location_in_text {
 	# and don't go past the beginning marker.
 	my $start = $__gnaw__curr_text_element;
 	$count = 100;
-	while( 	($count--) and  
-		($start ne $__gnaw__head_text_element) and 
-		($start->[__GNAW__LETTER] ne "\n") 
-	){
-		$start = $start->[__GNAW__PREV];
+	while ($count--) {
+		if($start eq $__gnaw__head_text_element) {
+			$count=0;
+		} elsif ($start->[__GNAW__WHAT] == __GNAW__LETTER_WHAT) {
+			if($start->[__GNAW__PAYLOAD] eq "\n") {
+				$count=0;
+			}
+		} else {
+			$start = $start->[__GNAW__PREV];
+		}
 	}
-
 
 	# starting from current 
 	# move to the end of the line.
@@ -1609,12 +1792,22 @@ sub __gnaw__string_showing_user_current_location_in_text {
 	# and don't go past the end marker.
 	my $stop = $__gnaw__curr_text_element;
 	$count = 100;
-	while( 	($count--) and  
-		($stop ne $__gnaw__tail_text_element) and 
-		($stop->[__GNAW__LETTER] ne "\n") 
-	){
-		$stop = $stop->[__GNAW__NEXT];
+	while ($count--) {
+		if($stop eq $__gnaw__tail_text_element) {
+			$count=0;
+		} elsif ($start->[__GNAW__WHAT] == __GNAW__LETTER_WHAT) {
+			if($start->[__GNAW__PAYLOAD] eq "\n") {
+				$count=0;
+			}
+		} else {
+			$start = $start->[__GNAW__NEXT];
+		}
 	}
+
+	# for now, override start and stop to head/tail pointers.
+	# we're parsing small enough strings that it isn't a problem.
+	$start = $__gnaw__head_text_element;
+	$stop = $__gnaw__tail_text_element;
 
 
 	# now, go from start to stop marker and print out the elements
@@ -1628,48 +1821,7 @@ sub __gnaw__string_showing_user_current_location_in_text {
 	my $keepgoing=1;
 
 	while ($keepgoing) {
-		if($curr eq $__gnaw__curr_text_element) {
-			$final_string.= ">";
-		} else {
-			$final_string.= " ";
-		}
-
-		$final_string .= $curr." ";
-
-		if($curr eq $__gnaw__head_text_element) {
-			$final_string.= "HEAD";
-		} elsif ($curr eq $__gnaw__tail_text_element){
-			$final_string.= "TAIL";
-		} else {
-			my $letter = $curr->[__GNAW__LETTER];
-			$final_string.= $letter;
-		}
-
-		$final_string.= " : ";
-
-		for(my $iter=__GNAW__LOCATION_MARKERS; $iter<scalar(@$curr); $iter++) {
-			my $markerref = $curr->[$iter];
-			if(defined($markerref)) {
-				if(ref($markerref) eq 'CODE') {
-					$final_string.= " $markerref-callback ";
-				} elsif (ref($markerref) eq 'REF') {
-
-					my $referent = $$markerref;
-
-					if(ref($referent) eq 'ARRAY') {
-						$final_string.= " $referent-textmarker ";
-					} else {
-						$final_string.= " $markerref-(?????) ";					
-					}
-				} else {
-					$final_string .= " '$markerref' ";
-				}
-			} else {
-				$final_string.= " undef ";
-			}
-		}
-
-		$final_string.= "\n";
+		$final_string .= __gnaw__string_describing_single_text_element($curr);
 
 		if($curr eq $stop) {
 			$keepgoing=0;
@@ -1682,33 +1834,34 @@ sub __gnaw__string_showing_user_current_location_in_text {
 	return $final_string;
 }
 
-####################################################################
-####################################################################
-####################################################################
-####################################################################
-####################################################################
-####################################################################
-####################################################################
+
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 
 
-####################################################################
-####################################################################
-####################################################################
-####################################################################
-####################################################################
-####################################################################
-####################################################################
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 
 
-####################################################################
-####################################################################
-####################################################################
-####################################################################
-####################################################################
-####################################################################
-####################################################################
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 
 
@@ -1732,26 +1885,40 @@ our @__gnaw__fallback_here_on_fail;
 
 sub __gnaw__push_fallback_postition {
 	my ($instruction, $textmarker) = @_;
-	GNAWMONITOR("push_fallback_position, instruction '$instruction', marker '$textmarker', text is ".$$textmarker);
+
+	########GNAWMONITOR("push_fallback_position, instruction '$instruction', marker '$textmarker'");
 
 	push(@__gnaw__fallback_here_on_fail, [$instruction, $textmarker]);
 }
 
 sub __gnaw__pop_fallback_postition {
+	########GNAWMONITOR("POPPING FALLBACK POSITION");
+	if(scalar(@__gnaw__fallback_here_on_fail)==0) {
+		__gnaw__die("tried to pop fallback position, but array is empty");
+	}
 	my $arrref = pop(@__gnaw__fallback_here_on_fail);
 	my ($instruction, $textmarker) = @$arrref;
-	GNAWMONITOR("pop_fallback_position, instruction '$instruction', marker '$textmarker', text is ".$$textmarker);
+	########GNAWMONITOR("pop_fallback_position, instruction '$instruction', marker '$textmarker'");
 	return ($instruction, $textmarker);
 }
 
 
 
 sub __gnaw__parse_failed {
-	GNAWMONITOR( "__gnaw__parse_failed BEGINNING\n" );
+	########GNAWMONITOR( "__gnaw__parse_failed BEGINNING\n" );
 
 	my ($instruction, $textmarker) = __gnaw__pop_fallback_postition();
 	__gnaw__move_current_instruction_pointer($instruction);
 	__gnaw__restore_old_text_marker($textmarker);
+
+	# delete the current text marker and all the markers in front of it until we hit text
+	while(	($__gnaw__curr_text_element ne $__gnaw__tail_text_element) and
+		($__gnaw__curr_text_element->[__GNAW__WHAT] != __GNAW__LETTER_WHAT)
+	) {
+		__gnaw__delete_this_text_element($__gnaw__curr_text_element);
+	}
+
+
 }
 
 
@@ -1803,20 +1970,20 @@ sub __gnaw__given_instruction_return_next_instruction {
 	return $nextinstruction;
 }
 
-#######################################################################
-#######################################################################
-#######################################################################
-#######################################################################
-#######################################################################
-#######################################################################
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 
-#######################################################################
-#######################################################################
-#######################################################################
-#######################################################################
-#######################################################################
-#######################################################################
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 
 sub l {
@@ -1878,17 +2045,17 @@ sub ql {
 }
 
 
-#######################################################################
-#######################################################################
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 # __gnaw__literal is the low level, single literal, operation.
 # the "l" and "ql" and other functions must break their input
 # parameters down into individual calls to __gnaw__literal.
-#######################################################################
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 sub __gnaw__literal {
-#######################################################################
-#######################################################################
-#######################################################################
-	GNAWMONITOR( "__gnaw__literal command");
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+	########GNAWMONITOR( "__gnaw__literal command");
 	my ($literal) = @_;
 	my @letters = split(//, $literal);
 
@@ -1904,29 +2071,32 @@ sub __gnaw__literal {
 	return $stitcher;
 }
 
-#######################################################################
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 # __gnaw__lit is the callback the parser will call when dealing with a literal.
-#######################################################################
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 sub __gnaw__lit_callback {
-	GNAWMONITOR( "__gnaw__lit command");
+	########GNAWMONITOR( "__gnaw__lit command");
 	my $thisinstruction = __gnaw__get_current_instruction_pointer();
-	GNAWMONITOR( "__gnaw__lit command: looking for ".($thisinstruction->{debugstring}));
+	########GNAWMONITOR( "__gnaw__lit command: looking for ".($thisinstruction->{debugstring}));
 
 	$__gnaw__skip_code->();
 
 	my $arrref = $thisinstruction->{value};
 	my $lastiter = scalar(@$arrref);
 
-	GNAWMONITOR( "__gnaw__lit command: ". (Dumper $arrref));
-	GNAWMONITOR( "__gnaw__lit command: lastiter=$lastiter");
+	########GNAWMONITOR( "__gnaw__lit command: ". (Dumper $arrref));
+	########GNAWMONITOR( "__gnaw__lit command: lastiter=$lastiter");
 
-	GNAWMONITOR( __gnaw__string_showing_user_current_location_in_text() );
+	########GNAWMONITOR( __gnaw__string_showing_user_current_location_in_text() );
 
 	for(my $iter=0; $iter<$lastiter; $iter++) {
 		my $currchar = __gnaw__curr_character();
+
+		if($currchar eq 'FAIL') { return }
+
 		my $litchar = $arrref->[$iter];
 
-		GNAWMONITOR("__gnaw__lit command: comparing $currchar eq $litchar");
+		########GNAWMONITOR("__gnaw__lit command: comparing $currchar eq $litchar");
 		unless($currchar eq $litchar) {
 			__gnaw__parse_failed();
 			return;
@@ -1940,12 +2110,12 @@ sub __gnaw__lit_callback {
 
 
 
-#######################################################################
-#######################################################################
-#######################################################################
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 sub __gnaw__convert_character_class_string_into_hash_ref {
-	GNAWMONITOR;
+	########GNAWMONITOR;
 	my ($characterset)=@_;
 
 	my @chars = split(//, $characterset);
@@ -1979,12 +2149,12 @@ sub __gnaw__convert_character_class_string_into_hash_ref {
 	return $char_set_hash_ref;
 }
 
-#######################################################################
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 # character class
-#######################################################################
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 sub cc {
-#######################################################################
-	GNAWMONITOR( "cc command");
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+	########GNAWMONITOR( "cc command");
 	my ($characterset)=@_;
 
 	my $char_set_hash_ref = 
@@ -2005,7 +2175,7 @@ sub cc {
 
 
 sub __gnaw__cc {
-	GNAWMONITOR( "__gnaw__cc command");
+	########GNAWMONITOR( "__gnaw__cc command");
 	my $thisinstruction = __gnaw__get_current_instruction_pointer();
 	my $nextinstruction = __gnaw__given_instruction_return_next_instruction($thisinstruction);
 	__gnaw__move_current_instruction_pointer($nextinstruction);
@@ -2019,13 +2189,14 @@ sub __gnaw__cc {
 	# function that looks for text, like literals and character classes.
 	$__gnaw__skip_code->();
 
-	GNAWMONITOR( "__gnaw__cc command: looking for ".($thisinstruction->{debugstring}));
+	########GNAWMONITOR( "__gnaw__cc command: looking for ".($thisinstruction->{debugstring}));
 
 	my $hashref = $thisinstruction->{value};
 
-	GNAWMONITOR( __gnaw__string_showing_user_current_location_in_text() );
+	########GNAWMONITOR( __gnaw__string_showing_user_current_location_in_text() );
 
 	my $currchar = __gnaw__curr_character();
+	if($currchar eq 'FAIL') { return }
 
 	if(exists($hashref->{$currchar})) {
 		__gnaw__move_pointer_forward();
@@ -2037,12 +2208,12 @@ sub __gnaw__cc {
 
 
 
-#######################################################################
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 # inverted character class
-#######################################################################
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 sub CC {
-#######################################################################
-	GNAWMONITOR( "CC command");
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+	########GNAWMONITOR( "CC command");
 	my ($characterset)=@_;
 
 	my $char_set_hash_ref = 
@@ -2063,7 +2234,7 @@ sub CC {
 
 
 sub __gnaw__inv_cc {
-	GNAWMONITOR( "__gnaw__inv_cc command");
+	########GNAWMONITOR( "__gnaw__inv_cc command");
 	my $thisinstruction = __gnaw__get_current_instruction_pointer();
 	my $nextinstruction = __gnaw__given_instruction_return_next_instruction($thisinstruction);
 	__gnaw__move_current_instruction_pointer($nextinstruction);
@@ -2077,13 +2248,14 @@ sub __gnaw__inv_cc {
 	# function that looks for text, like literals and character classes.
 	$__gnaw__skip_code->();
 
-	GNAWMONITOR( "__gnaw__inv_cc command: looking for NOT ".($thisinstruction->{debugstring}));
+	########GNAWMONITOR( "__gnaw__inv_cc command: looking for NOT ".($thisinstruction->{debugstring}));
 
 	my $hashref = $thisinstruction->{value};
 
-	GNAWMONITOR( __gnaw__string_showing_user_current_location_in_text() );
+	########GNAWMONITOR( __gnaw__string_showing_user_current_location_in_text() );
 
 	my $currchar = __gnaw__curr_character();
+	if($currchar eq 'FAIL') { return }
 
 	if(exists($hashref->{$currchar})) {
 		__gnaw__parse_failed();
@@ -2105,13 +2277,13 @@ sub CCWORD { CC('a-zA-Z0-9_') }
 sub ccspace { cc("\n \t \r \f") }
 sub CCSPACE { CC("\n \t \r \f") }
 
-#######################################################################
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 # "thing" function is equivalent to perl regular expression '.' 
 # any single character.
-#######################################################################
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 sub thing {
-	GNAWMONITOR( "thing command");
+	########GNAWMONITOR( "thing command");
 
 	my $compiled_code = {
 		opcode => 'thing',
@@ -2125,12 +2297,12 @@ sub thing {
 
 
 sub __gnaw__thing {
-	GNAWMONITOR( "__gnaw__thing command");
+	########GNAWMONITOR( "__gnaw__thing command");
 	my $thisinstruction = __gnaw__get_current_instruction_pointer();
 	my $nextinstruction = __gnaw__given_instruction_return_next_instruction($thisinstruction);
 	__gnaw__move_current_instruction_pointer($nextinstruction);
 
-	GNAWMONITOR( __gnaw__string_showing_user_current_location_in_text() );
+	########GNAWMONITOR( __gnaw__string_showing_user_current_location_in_text() );
 
 	# have to skip. when we do a "get", the get function does a skip
 	# if we do a match('b', thing, 'b'), and we dont skip cc function,
@@ -2141,7 +2313,7 @@ sub __gnaw__thing {
 	# function that looks for text, like literals and character classes.
 	$__gnaw__skip_code->();
 
-	if(__gnaw__at_end_of_string()) {
+	if(__gnaw__at_end_of_input_text()) {
 		__gnaw__parse_failed();
 		return;
 	} else {
@@ -2150,15 +2322,15 @@ sub __gnaw__thing {
 
 }
 
-#######################################################################
-#######################################################################
-#######################################################################
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 # gnaw series evaporates into whatever subcommands it consists of.
 # there is no __gnaw__series subroutine to handle the series because
 # the series dissolves into atomic operations like literals and character classes.
-#######################################################################
-#######################################################################
-#######################################################################
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 
 sub __gnaw__take_grammar_components_and_turn_into_list_of_stitchers {
@@ -2190,7 +2362,7 @@ sub __gnaw__take_grammar_components_and_turn_into_list_of_stitchers {
 
 
 sub series {
-	GNAWMONITOR( "series command");
+	########GNAWMONITOR( "series command");
 	my @stitcherseries = __gnaw__take_grammar_components_and_turn_into_list_of_stitchers(@_);
 
 	# getfirst, getlast, setprevious, setnext
@@ -2219,46 +2391,51 @@ sub series {
 
 
 
-#######################################################################
-#######################################################################
-#######################################################################
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 # alternation command breaks down into three subcommands.
 # initialization
 # alternation command
 # rejoinder
-#######################################################################
-#######################################################################
-#######################################################################
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 # callback used by parser when executing an alternate instruction
 # we only hit the init command once. Use it to initialize the iterator value
 sub __gnaw__alt_init {
-	GNAWMONITOR( "__gnaw__alt_init:");
+	########GNAWMONITOR( "__gnaw__alt_init:");
 	my $alt_init_instruction =  __gnaw__get_current_instruction_pointer();
 	my $alt_cmd_instruction = __gnaw__given_instruction_return_next_instruction($alt_init_instruction);
 	$alt_cmd_instruction->{iterator}=0;
 	__gnaw__move_current_instruction_pointer($alt_cmd_instruction);
 }
 
-# callback used by parser when executing an alternate instruction
-# we hit this at start of command and every time an alternate fails.
 # based off iterator prepare to try another alternate.
 sub __gnaw__alt_cmd {
-	GNAWMONITOR( "\n\n\n__gnaw__alt_cmd:");
+	########GNAWMONITOR( "\n\n\n__gnaw__alt_cmd:");
 	my $alt_cmd_instruction = __gnaw__get_current_instruction_pointer();
+	my $alt_cmd_fail = $alt_cmd_instruction->{alt_cmd_fail};
 	my $iterator = $alt_cmd_instruction->{iterator};
 	my $lastiterator = scalar(@{$alt_cmd_instruction->{alternates}});
 
+
 	# if we're done, we failed to match anything
 	if($iterator == $lastiterator) {
+		# we created a marker at the beginning of the alternate command
+		# now that we've failed, delete the marker
 		__gnaw__parse_failed();
 		return;
 	} else {
 		# we're not done, try the next alternate
-		$alt_cmd_instruction->{iterator}++;
+		$alt_cmd_instruction->{iterator}++;	
 
-		my $textmarker;
-		__gnaw__get_current_text_marker($textmarker);		
+		# we created a marker at the beginning of the alternate command
+		# create a fallback that will go to that marker if we fail.
+		my $textmarker = __gnaw__create_new_marker_before_current_element
+			######## ( 'alternation command is going to try another alternate' )
+		;	
 		__gnaw__push_fallback_postition($alt_cmd_instruction, $textmarker);
 
 		my $nextcmd = $alt_cmd_instruction->{alternates}->[$iterator];
@@ -2271,29 +2448,30 @@ sub __gnaw__alt_cmd {
 # we start down an alternation path and get all teh way to the end.
 # i.e. we matched! Woot!
 sub __gnaw__alt_rejoinder {
-	GNAWMONITOR( "\n\n\n__gnaw__alt_rejoinder:");
+	########GNAWMONITOR( "\n\n\n__gnaw__alt_rejoinder:");
 
 	# we can pop off the fallback position and discard them.
 	my ($fallback_cmd, $fallback_marker) = __gnaw__pop_fallback_postition(); 
-	__gnaw__garbage_collect_old_marker($fallback_marker);
+	# we created this marker at the start of the alternation command. can delete it now.
+	__gnaw__delete_this_text_element($fallback_marker);
 
 	my $alt_rej_instruction = __gnaw__get_current_instruction_pointer();
-	GNAWMONITOR( "__gnaw__alt_rejoinder: alt_rej_instruction is '$alt_rej_instruction'");
+	########GNAWMONITOR( "__gnaw__alt_rejoinder: alt_rej_instruction is '$alt_rej_instruction'");
 	my $nextinstruction = __gnaw__given_instruction_return_next_instruction($alt_rej_instruction);
-	GNAWMONITOR( "__gnaw__alt_rejoinder: nextinstruction is '$nextinstruction'");
+	########GNAWMONITOR( "__gnaw__alt_rejoinder: nextinstruction is '$nextinstruction'");
 	__gnaw__move_current_instruction_pointer($nextinstruction);
-	GNAWMONITOR( "\n\n\n");
+	########GNAWMONITOR( "\n\n\n");
 }
 
 
 
-#######################################################################
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 # user function for creating an alternate.
 # pass in a series of alternates into call to "a" function.
 # each parameter passed in will be treated as a different alternate.
 # group components you want to be part of a sequence within an alternate
 # by using array references
-#######################################################################
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 sub a {
 	my @alternates = __gnaw__take_grammar_components_and_turn_into_list_of_stitchers(@_);
@@ -2303,9 +2481,9 @@ sub a {
 	return $alternation_stitcher;
 }
 
-#######################################################################
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 # This is useful if you have a bunch of alternates which are all single literals.
-#######################################################################
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 sub qa {
 	my ($string)=@_;
 	my @words = __gnaw__separate_string_into_words($string);
@@ -2314,7 +2492,7 @@ sub qa {
 }
 
 sub __gnaw__alternation {
-	GNAWMONITOR( "alternation command");
+	########GNAWMONITOR( "alternation command");
 	my @alternates = @_;
 
 	my $alt_init = {
@@ -2334,10 +2512,7 @@ sub __gnaw__alternation {
 		coderef => \&__gnaw__alt_rejoinder,
 	};
 
-
-
 	$alt_cmd->{rejoinder} = $alt_rejoinder;
-
 
 	my $initializestitcher = generate_stitcher(	$alt_init, 		$alt_init);
 	my $alternatestitcher  = generate_stitcher(	$alt_cmd, 		$alt_cmd);
@@ -2369,18 +2544,18 @@ sub __gnaw__alternation {
 }
 
 
-#######################################################################
-#######################################################################
-#######################################################################
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 # greedy command breaks down into five subcommands.
 # initialization
 # pattern start
 # pattern pass
 # pattern fail
 # rest of grammar
-#######################################################################
-#######################################################################
-#######################################################################
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 # callback used by parser when executing an greedy instruction
 sub __gnaw__grdy_init {
@@ -2397,8 +2572,9 @@ sub __gnaw__grdy_init {
 	if($grdy_patt_start->{min}==0) {
 		my $grdy_rest_of_grammar = $grdy_patt_start->{grdy_rest_of_grammar};
 
-		my $textmarker;
-		__gnaw__get_current_text_marker($textmarker);		
+		my $textmarker =  __gnaw__create_new_marker_before_current_element
+			######## ( 'greedy initialization phase creates marker for min quantity of zero' )
+		;		
 		__gnaw__push_fallback_postition($grdy_rest_of_grammar, $textmarker);
 	}
 
@@ -2412,8 +2588,9 @@ sub __gnaw__grdy_patt_start {
 
 	my $grdy_patt_fail = $grdy_patt_start->{grdy_patt_fail};
 
-	my $textmarker;
-	__gnaw__get_current_text_marker($textmarker);		
+	my $textmarker =  __gnaw__create_new_marker_before_current_element
+		######## ( ' greedy pattern start ' )
+	;		
 	__gnaw__push_fallback_postition($grdy_patt_fail, $textmarker);
 }
 
@@ -2433,7 +2610,7 @@ sub __gnaw__grdy_patt_pass{
 	# at start of text to fallback to the "fail" function.
 	# we don't need that fallback position anymore. pop it. and delete it.
 	my ($fallback_cmd, $fallback_marker) = __gnaw__pop_fallback_postition(); 
-	__gnaw__garbage_collect_old_marker($fallback_marker);
+	__gnaw__delete_this_text_element($fallback_marker);
 
 	# if quantifier is consumable
 	if($grdy_patt_start->{consumable}) {
@@ -2447,7 +2624,7 @@ sub __gnaw__grdy_patt_pass{
 			# if we hit the minimum, then go through and delete all the previous markers.
 			while(scalar(@{$grdy_patt_start->{textmarkers}})) {
 				my $textmarker = pop(@{$grdy_patt_start->{textmarkers}});
-				__gnaw__garbage_collect_old_marker($textmarker);
+				__gnaw__delete_this_text_element($textmarker);
 				__gnaw__move_current_instruction_pointer($grdy_patt_start);	
 			}
 		} else { 
@@ -2479,8 +2656,9 @@ sub __gnaw__grdy_patt_pass{
 				# this means that if quantifier consumes 6, but then 
 				# rest of grammar fails, we will fallback to marker for 5
 				# and then try the rest of grammar from there.
-				my $textmarker;
-				__gnaw__get_current_text_marker($textmarker);		
+				my $textmarker =  __gnaw__create_new_marker_before_current_element
+					########('__gnaw__grdy_patt_pass creating a fallback position if rest of grammar fails')
+				;		
 				__gnaw__push_fallback_postition($grdy_rest_of_grammar, $textmarker);
 			} # if iterator less than min, don't create a fallback position.
 		
@@ -2516,7 +2694,7 @@ sub __gnaw__grdy_patt_fail{
 		# else we didn't meet minimum, pop off all the fallback markers, then fail.
 		while(scalar(@{$grdy_patt_start->{textmarkers}})) {
 			my $textmarker = pop(@{$grdy_patt_start->{textmarkers}});
-			__gnaw__garbage_collect_old_marker($textmarker);
+			__gnaw__delete_this_text_element($textmarker);
 		}
 
 		__gnaw__parse_failed();
@@ -2531,12 +2709,12 @@ sub __gnaw__grdy_rest_of_grammar {
 	__gnaw__move_current_instruction_pointer($grdy_next_instruction);
 }
 
-#######################################################################
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 # user function to create a greedy quantifier
 # g( [min, max?], grammar component, component...? )
-#######################################################################
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 sub g {
-	GNAWMONITOR( "g (greedy) command");
+	########GNAWMONITOR( "g (greedy) command");
 
 	# g( [min, max?, consumable?], patternstitcher(s), );
 	#
@@ -2639,18 +2817,18 @@ sub some { g([1], @_) }		# one or more
 sub anything  { any (thing) } 	# zero or more 'things'
 sub something { some(thing) }	# one or more 'things'
 
-#######################################################################
-#######################################################################
-#######################################################################
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 # thrifty command breaks down into five subcommands.
 # initialization
 # pattern start
 # pattern pass
 # pattern fail
 # rest of grammar
-#######################################################################
-#######################################################################
-#######################################################################
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 # callback used by parser when executing a thrifty instruction
 sub __gnaw__tfty_init {
@@ -2665,8 +2843,9 @@ sub __gnaw__tfty_init {
 		my $tfty_rest_of_grammar = $tfty_patt_start->{tfty_rest_of_grammar};
 		__gnaw__move_current_instruction_pointer($tfty_rest_of_grammar);
 
-		my $textmarker;
-		__gnaw__get_current_text_marker($textmarker);		
+		my $textmarker =  __gnaw__create_new_marker_before_current_element
+			######## ( ' thrifty init phase creating a marker for minimum of zero matches, will fallback here if rest of grammar fails.') 
+		;		
 		__gnaw__push_fallback_postition($tfty_patt_start, $textmarker);
 	} else {
 		# otherwise, minimum is greater than zero, so go try a pattern.
@@ -2683,14 +2862,15 @@ sub __gnaw__tfty_patt_start {
 
 	my $tfty_patt_fail = $tfty_patt_start->{tfty_patt_fail};
 
-	my $textmarker;
-	__gnaw__get_current_text_marker($textmarker);		
+	my $textmarker =  __gnaw__create_new_marker_before_current_element
+		######## ( '__gnaw__tfty_patt_start fallback position at start of pattern ' )
+	;		
 	__gnaw__push_fallback_postition($tfty_patt_fail, $textmarker);
 }
 
 # callback used by parser when executing a thrifty instruction
 sub __gnaw__tfty_patt_pass{
-	GNAWMONITOR("__gnaw__tfty_patt_pass BEGIN");
+	########GNAWMONITOR("__gnaw__tfty_patt_pass BEGIN");
 	my $tfty_patt_pass = __gnaw__get_current_instruction_pointer();
 	my $tfty_patt_start = $tfty_patt_pass->{tfty_patt_start};
 	$tfty_patt_start->{iterator}++;
@@ -2704,11 +2884,11 @@ sub __gnaw__tfty_patt_pass{
 	# at start of text to fallback to the "fail" function.
 	# we don't need that fallback position anymore. pop it. and delete it.
 	my ($fallback_cmd, $fallback_marker) = __gnaw__pop_fallback_postition(); 
-	__gnaw__garbage_collect_old_marker($fallback_marker);
+	__gnaw__delete_this_text_element($fallback_marker);
 
 	# if quantifier is consumable
 	if($tfty_patt_start->{consumable}) {
-		GNAWMONITOR("__gnaw__tfty_patt_pass consumable");
+		########GNAWMONITOR("__gnaw__tfty_patt_pass consumable");
 		if(0) {
 		} elsif ($iterator<$min) {
 			# if min is something like "6", and iterator is less than 6,
@@ -2719,7 +2899,7 @@ sub __gnaw__tfty_patt_pass{
 			# if we hit the minimum, then go through and delete all the previous markers.
 			while(scalar(@{$tfty_patt_start->{textmarkers}})) {
 				my $textmarker = pop(@{$tfty_patt_start->{textmarkers}});
-				__gnaw__garbage_collect_old_marker($textmarker);
+				__gnaw__delete_this_text_element($textmarker);
 				__gnaw__move_current_instruction_pointer($tfty_rest_of_grammar);
 			}
 		} else { 
@@ -2729,8 +2909,9 @@ sub __gnaw__tfty_patt_pass{
 
 			# if iterator is less than max, set fallback position to try another pattern
 			if($openended or ($iterator<$max)) {
-				my $textmarker;
-				__gnaw__get_current_text_marker($textmarker);		
+				my $textmarker =  __gnaw__create_new_marker_before_current_element
+					######## ( " __gnaw__tfty_patt_pass set fallback position to try another pattern " )
+				;		
 				__gnaw__push_fallback_postition($tfty_patt_start, $textmarker);
 
 				__gnaw__move_current_instruction_pointer($tfty_rest_of_grammar);	
@@ -2741,38 +2922,39 @@ sub __gnaw__tfty_patt_pass{
 		}
 	} else {
 		# else quantifier is NOT consumable
-		GNAWMONITOR("__gnaw__tfty_patt_pass NOT consumable");
+		########GNAWMONITOR("__gnaw__tfty_patt_pass NOT consumable");
 
 		if(0) {
 
 		# if we can try some more
 		} elsif($openended or ($iterator<$max)) {
 
-			GNAWMONITOR("__gnaw__tfty_patt_pass if we can try some more");
+			########GNAWMONITOR("__gnaw__tfty_patt_pass if we can try some more");
 			# if iterator says we matched enough to meet minimum, create fallback to here.
 			if($iterator >= $min) {
-				GNAWMONITOR("__gnaw__tfty_patt_pass iterator>=min");
+				########GNAWMONITOR("__gnaw__tfty_patt_pass iterator>=min");
 				# create a fallback position at the current text marker
 				# with the instruction being 'try another pattern'
-				my $textmarker;
-				__gnaw__get_current_text_marker($textmarker);		
+				my $textmarker =  __gnaw__create_new_marker_before_current_element
+					######## ( " __gnaw__tfty_patt_pass create a fallback position to try another pattern " )
+				;		
 				__gnaw__push_fallback_postition($tfty_patt_start, $textmarker);
 
 				# now go try rest of grammar. if it fails, we'll try another pattern
 				__gnaw__move_current_instruction_pointer($tfty_rest_of_grammar);			
 			} else {
-				GNAWMONITOR("__gnaw__tfty_patt_pass haven't matched enough paterns to hit minimum");
+				########GNAWMONITOR("__gnaw__tfty_patt_pass haven't matched enough paterns to hit minimum");
 				# else we haven't matched enough paterns to hit minimum. do another patern
 				__gnaw__move_current_instruction_pointer($tfty_patt_start);			
 			}
 		} else {
-			GNAWMONITOR("__gnaw__tfty_patt_pass cant try any more");
+			########GNAWMONITOR("__gnaw__tfty_patt_pass cant try any more");
 			# else not open ended and iterator == max, cant try any more, go to rest of grammar
 			# if max==6 then no need to create a fallback 
 			__gnaw__move_current_instruction_pointer($tfty_rest_of_grammar);
 		}
 	}
-	GNAWMONITOR("__gnaw__tfty_patt_pass END");
+	########GNAWMONITOR("__gnaw__tfty_patt_pass END");
 }
 
 # callback used by parser when executing a thrifty instruction
@@ -2795,7 +2977,7 @@ sub __gnaw__tfty_patt_fail{
 		# else we didn't meet minimum, pop off all the fallback markers, then fail.
 		while(scalar(@{$tfty_patt_start->{textmarkers}})) {
 			my $textmarker = pop(@{$tfty_patt_start->{textmarkers}});
-			__gnaw__garbage_collect_old_marker($textmarker);
+			__gnaw__delete_this_text_element($textmarker);
 		}
 
 		__gnaw__parse_failed();
@@ -2811,12 +2993,12 @@ sub __gnaw__tfty_rest_of_grammar {
 }
 
 
-#######################################################################
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 # user function to create a greedy quantifier
 # g( [min, max?], grammar component, component...? )
-#######################################################################
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 sub t {
-	GNAWMONITOR( "thrifty command");
+	########GNAWMONITOR( "thrifty command");
 
 	# t ( [min, max?, consumable?] , patternstitcher(s) );
 	#
@@ -2912,11 +3094,11 @@ sub t {
 }
 
 
-#######################################################################
-#######################################################################
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 # "now" is executed every time the parser hits that branch of the grammar
-#######################################################################
-#######################################################################
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 sub now {
 	my ($coderef)=@_;
@@ -2940,18 +3122,20 @@ sub now {
 }
 
 
-#######################################################################
-#######################################################################
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 # "defer" is scheduled for execution but is only called if the grammar matches
 # that interpretation.
-#######################################################################
-#######################################################################
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 sub defer {
 	my ($coderef) = @_;
 
 	my $closure = sub {
-		__gnaw__assign_callback_to_current_text_element($coderef); # callback same as code except for this line.
+		__gnaw__create_new_element_before_current_element(__GNAW__CLLBCK_WHAT, $coderef
+			######## , 'defer callback'
+		); # callback same as code except for this line.
 
 		my $thisinstruction = __gnaw__get_current_instruction_pointer();
 		my $nextinstruction = __gnaw__given_instruction_return_next_instruction($thisinstruction);
@@ -2969,17 +3153,17 @@ sub defer {
 }
 
 
-#######################################################################
-#######################################################################
-#######################################################################
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 # commit command is an immediate commitment to the current interpretation
 # of the grammar to the string being parsed. It causes any callbacks
 # from the beginning of the string to the current pointer to be executed
 # and it deletes the text from beginning of string to 10 characters
 # before the current pointer.
-#######################################################################
-#######################################################################
-#######################################################################
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 sub commit {
 	return now(\&__gnaw__commit_text_to_current_location);
@@ -3055,22 +3239,41 @@ sub __gnaw__get {
 	my $begintextmarker;
 
 	my $beginstitcher = now(sub{
+		########GNAWMONITOR("GET function, BEGIN opcode, about to skip whitespace");
 		$__gnaw__skip_code->();
-		__gnaw__get_current_text_marker($begintextmarker);
+		########GNAWMONITOR("GET function, BEGIN opcode, about to create start marker");
+		$begintextmarker =  __gnaw__create_new_marker_before_current_element
+			######## ( 'get function creating start marker' )
+		;		
+		########GNAWMONITOR("GET function, BEGIN opcode, created start marker, '$begintextmarker'");
 	});
 	my $get_begin = $beginstitcher->('getfirst');
 	$get_begin->{opcode} = 'get_begin';
 
 
 	my $endstitcher = now(sub{
-		my $endtextmarker;
-		__gnaw__get_current_text_marker($endtextmarker);
+		########GNAWMONITOR("GET function, END opcode, about to create end marker");
+		my $endtextmarker =  __gnaw__create_new_marker_before_current_element		
+			######## ( 'get function creating end marker' )
+		;
+
+		# need to make a copy of the markers NOW because they may change 
+		# by the time the defered callback to "get" occurs.
+		# these copies will be contained in the subroutine closure at the time its closed.
+		my $beginmarkercopy = $begintextmarker;
+		my $endmarkercopy   = $endtextmarker;
+
+		########GNAWMONITOR("GET function, BEGIN opcode, created start marker, '$endtextmarker'");
 		my $call_back_with_string = sub {
+			########GNAWMONITOR("GET function, callback function, about to read string between markers $begintextmarker and $endtextmarker");
 			my $string = __gnaw__read_string_between_markers
-				($begintextmarker,$endtextmarker);
+				($beginmarkercopy,$endmarkercopy);
+			########GNAWMONITOR("GET function, callback function, string is '$string', about to pass to user function '$user_call_back'");
 			$user_call_back->($string);
 		};
-		__gnaw__assign_callback_to_current_text_element($call_back_with_string);
+		__gnaw__create_new_element_before_current_element(__GNAW__CLLBCK_WHAT, $call_back_with_string
+			######## , " 'get' function created callback, markers are $begintextmarker,$endtextmarker  "
+		);
 	});
 	my $get_end = $endstitcher->('getfirst');
 	$get_end->{opcode} = 'get_end';
@@ -3094,28 +3297,28 @@ sub __gnaw__get {
 
 
 
-#####################################################################
-#####################################################################
-#####################################################################
-#####################################################################
-#####################################################################
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
-#####################################################################
-#####################################################################
-#####################################################################
-#####################################################################
-#####################################################################
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 # outer functions
-#####################################################################
-#####################################################################
-#####################################################################
-#####################################################################
-#####################################################################
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 
 
 sub parse {
-	GNAWMONITOR( "parse command begin");
+	########GNAWMONITOR( "parse command begin");
 
 	my $stitcher=series(@_);
 
@@ -3128,35 +3331,54 @@ sub parse {
 	my $pars_init = {
 		opcode => 'parseinit',
 		coderef => sub {
+			########GNAWMONITOR;
 			$variableinitroutine->(); 
+
 			my $thisinstruction = __gnaw__get_current_instruction_pointer();
 			my $nextinstruction = __gnaw__given_instruction_return_next_instruction($thisinstruction);
 			__gnaw__move_current_instruction_pointer($nextinstruction);
+
+			my $parse_fail_instr = $thisinstruction->{parse_fail_instr};
+			########GNAWMONITOR("parse init about to push text marker");
+			my $textmarker =  __gnaw__create_new_marker_before_current_element
+				######## ( ' parse initialization instruction creating fallback marker ' )
+			;		
+			__gnaw__push_fallback_postition($parse_fail_instr, $textmarker);
+			########GNAWMONITOR("parse init finished pushing text marker");
+
 		},
 	};
+
+	########GNAWMONITOR("parse init hash ref is $pars_init");
 
 	my $pars_rejoinder = {
 		opcode => 'parserejoinder',
 		signifyendof => $pars_init,
 		coderef => sub{
+			########GNAWMONITOR("Parse rejoinder starting");
 			$__gnaw__processor_still_running=0;
 			$__gnaw__processor_succeeded=1;
-			GNAWMONITOR(__gnaw__string_showing_user_current_location_in_text);
+			########GNAWMONITOR(__gnaw__string_showing_user_current_location_in_text);
 			__gnaw__commit_text_to_current_location;
 		},
 	};
+
+	########GNAWMONITOR("parse rejoinder hash ref is $pars_rejoinder");
 
 	my $pars_failure = {
 		opcode => 'parserefailure',
 		signifyendof => $pars_init,
 		coderef => sub{
+			########GNAWMONITOR("in PARSE FAILURE");
 			$__gnaw__processor_still_running=0;
 			$__gnaw__processor_succeeded=0;
 		},
 	};
 
-	$pars_init ->{rejoinder}=$pars_rejoinder;
+	########GNAWMONITOR("parse failure hash ref is $pars_failure");
 
+	$pars_init->{rejoinder}=$pars_rejoinder;
+	$pars_init->{parse_fail_instr} = $pars_failure;
 
 	my $parsestitcher = generate_stitcher(	  $pars_init, 		$pars_init);
 	my $rejoinderstitcher = generate_stitcher($pars_rejoinder, 	$pars_rejoinder);
@@ -3176,16 +3398,15 @@ sub parse {
 		__gnaw__initialize_text_linked_list_to_empty();
 		__gnaw__insert_string_at_end_of_linked_list($string);
 
-		GNAWMONITOR("end string initialization\n\n\n\n\n\n");
+		########GNAWMONITOR("\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nend string initialization\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n");
+
+		########GNAWMONITOR(__gnaw__string_showing_user_current_location_in_text());
 
 		$__gnaw__processor_still_running=1;
 		$__gnaw__processor_succeeded=0;
 		$__gnaw__processor_instruction_pointer = $pars_init;
 
 
-		my $textmarker;
-		__gnaw__get_current_text_marker($textmarker);		
-		__gnaw__push_fallback_postition($pars_failure, $textmarker);
 
 
 		__gnaw__process_commands();
@@ -3193,14 +3414,14 @@ sub parse {
 		return $__gnaw__processor_succeeded;
 	};
 
-	GNAWMONITOR( "parse command end");
+	########GNAWMONITOR( "parse command end");
 
 	return $call_back;
 }
 
 
 sub match {
-	GNAWMONITOR( "match command begin");
+	########GNAWMONITOR( "match command begin");
 
 	my $stitcher=series(@_);
 
@@ -3225,18 +3446,19 @@ sub match {
 	$match_pattern = {
 		opcode => 'match_pattern',
 		coderef => sub {
-			GNAWMONITOR( "match_pattern");
-			if(__gnaw__at_end_of_string) {
-				GNAWMONITOR("match pattern at end of string");
+			########GNAWMONITOR( "match_pattern");
+			if(__gnaw__at_end_of_input_text) {
+				########GNAWMONITOR("match pattern at end of string");
 				$__gnaw__processor_still_running=0;
 				$__gnaw__processor_succeeded=0;
 				return;
 			}
 
-			GNAWMONITOR( "match_pattern about to create fallback");
+			########GNAWMONITOR( "match_pattern about to create fallback");
 			my $match_failure = $match_pattern->{match_failure};
-			my $textmarker;
-			__gnaw__get_current_text_marker($textmarker);		
+			my $textmarker =  __gnaw__create_new_marker_before_current_element 
+				######## ( ' match pattern function creating fallback marker ' )
+			;		
 			__gnaw__push_fallback_postition($match_failure, $textmarker);
 
 			my $thisinstruction = __gnaw__get_current_instruction_pointer();
@@ -3253,11 +3475,11 @@ sub match {
 			my $instruction;
 			my $textmarker;
 			__gnaw__pop_fallback_postition($instruction, $textmarker);
-			__gnaw__garbage_collect_old_marker($textmarker);
+			__gnaw__delete_this_text_element($textmarker);
 
 			$__gnaw__processor_still_running=0;
 			$__gnaw__processor_succeeded=1;
-			GNAWMONITOR(__gnaw__string_showing_user_current_location_in_text);
+			########GNAWMONITOR(__gnaw__string_showing_user_current_location_in_text);
 			__gnaw__commit_text_to_current_location;
 		},
 	};
@@ -3266,16 +3488,16 @@ sub match {
 		opcode => 'match_failure',
 		signifyendof => $match_pattern,
 		coderef => sub{
+			__gnaw__move_pointer_forward();
 			# we created a fallback, tried to parse, failed, and fellback to where we were
 			# If we can move current position forward, then do that and jump to match pattern
 			# if we can't move current position forward, we're out of text, fail.
-			if(__gnaw__at_end_of_string) {
-				GNAWMONITOR("match failure at end of string");
+			if(__gnaw__at_end_of_input_text) {
+				########GNAWMONITOR("match failure at end of string");
 				$__gnaw__processor_still_running=0;
 				$__gnaw__processor_succeeded=0;
 			} else {
-				GNAWMONITOR("match failure NOT at end of string");
-				__gnaw__move_pointer_forward();
+				########GNAWMONITOR("match failure NOT at end of string");
 				__gnaw__move_current_instruction_pointer($match_pattern);
 			}
 		},
@@ -3285,9 +3507,14 @@ sub match {
 		opcode => 'match_cant_try_anymore',
 		signifyendof => $match_pattern,
 		coderef => sub{
-			GNAWMONITOR("match_cant_try_anymore");
+			########GNAWMONITOR("match_cant_try_anymore");
 			$__gnaw__processor_still_running=0;
 			$__gnaw__processor_succeeded=0;
+
+			# delete the current text marker
+			# we inserted it at the start of the "match" function.
+			# move pointer to next element.
+			__gnaw__delete_this_text_element($__gnaw__curr_text_element);
 		},
 	};
 
@@ -3317,11 +3544,7 @@ sub match {
 		__gnaw__initialize_text_linked_list_to_empty();
 		__gnaw__insert_string_at_end_of_linked_list($string);
 
-		GNAWMONITOR("end string initialization\n\n\n\n\n\n");
-
-		my $textmarker;
-		__gnaw__get_current_text_marker($textmarker);		
-		__gnaw__push_fallback_postition($match_cant_try_anymore, $textmarker);
+		########GNAWMONITOR("\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nend string initialization\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n");
 
 		$__gnaw__processor_still_running=1;
 		$__gnaw__processor_succeeded=0;
@@ -3332,31 +3555,31 @@ sub match {
 		return $__gnaw__processor_succeeded;
 	};
 
-	GNAWMONITOR( "match command end");
+	########GNAWMONITOR( "match command end");
 
 	return $call_back;
 }
 
 
 
-#######################################################################
-#######################################################################
-#######################################################################
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 # this is the parsing engine that executes the compiled grammar.
-#######################################################################
-#######################################################################
-#######################################################################
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 
 sub __gnaw__process_commands {
-	GNAWMONITOR( "process_commands: ");
+	########GNAWMONITOR( "process_commands: ");
 	while($__gnaw__processor_still_running) {
-		GNAWMONITOR( "process_commands: while still running");
+		########GNAWMONITOR( "process_commands: while still running");
 		my $instruction =  __gnaw__get_current_instruction_pointer();
-		GNAWMONITOR( "process_commands: instruction is '$instruction'");
-		GNAWMONITOR( "process_commands: opcode is '". ($instruction->{opcode})."'");
+		########GNAWMONITOR( "process_commands: instruction is '$instruction'");
+		########GNAWMONITOR( "process_commands: opcode is '". ($instruction->{opcode})."'");
 		my $coderef = $instruction->{coderef};
-		GNAWMONITOR( "process_commands: coderef is '$coderef'");
+		########GNAWMONITOR( "process_commands: coderef is '$coderef'");
 		$coderef->();
 	}
 }
@@ -3365,43 +3588,71 @@ sub __gnaw__process_commands {
 
 
 
-#=head2 function1
-#
-#=cut
-#
-#sub function1 {
-#}
 
-=head1 TEXT INTERNALS
+=head1 INTERNALS
+
+These are notes to developers who may need to understand how
+the internals of Parse::Gnaw operate so they can create 
+advanced grammars.
+
+Also, these are notes to myself to remember how things function.
+
+=head2 Text being parsed.
 
 The text being parsed is held internally in a linked list. 
 This allows Parse::Gnaw to operate on a small subset of the 
 entire string being parsed. Theoretically, Parse::Gnaw can 
 parse an infinite amount of text as long as it can be 
 parsed in chunks small enough that the rules can disambiguate 
-in a small enough space to fit in memory.
+text that fits in memory.
 
-Each element in linked list is an array. 
+Each element in the linked list is an array. 
 
 Array stores the following data: 
-0 : pointer to previous element
-1 : pointer to next element
-3 : text stored at this location
-4 and above : text markers (optional)
 
+	0: numeric indicator of what type of element this is
+	1: payload
+	2: previous element pointer
+	3: next element pointer
+	4: used for debugging
+
+There are several "types" of elements as indicated by the
+value in index 0 of an element:
+
+	0: element has been deleted. If code tries to use 
+		a deleted element, this should act as a 
+		flag that something went wrong
+	1: element holds a single text character. 
+		letter is stored in payload index.
+	2: element holds a "marker". Markers are placed between
+		text elements by the parser to keep track of
+		where it is in the code, where captured strings
+		are located, where to fallback to in the text
+		if a particular branch of a parse fails, etc.
+		A marker contains no payload.
+	3: element contains a callback to be executed on
+		successful completion of parsing or a commit.
+		Payload contains code ref to callback.
+	4: element is a head/tail endpoint
 
 The linked list starts and ends with two signpost elements:
 'head' and 'tail'. No text is ever stored in these signpost
 elements. Any text being parsed is always contained between
 these two signpost elements.
 
-The 'current' pointer always points to the text that is 
+The 'current' pointer always points to the text that is about
+to be processed.
 
-ABOUT TO BE PARSED.
+When the __gnaw__parse_failed function is called, it will
+pop the last fallback position off the fallback array, 
+which will change the next instruction to be executed and
+will also move the text pointer back to teh fallback marker.
+The last thing the __gnaw__parse_failed function does is
+delete the fallback marker and any other elements in the
+text linked list that are not text.
 
-When the parser successfully matches a letter, it will move
-the pointer ahead by one character so that the next command
-will be ready to match.
+When any instruction moves the text pointer forward, it
+will also delete any old markers it encounters.
 
 The current pointer may point to the tail signpost element.
 This may mean that we are at the end of the string, or it
@@ -3409,17 +3660,20 @@ may mean that the next time we try to get the current letter
 that we need to insert more text from a file or something.
 
 All interfaces to the linked list should be through the 
-subroutines. 
+subroutines designed for working with the linked list.
+These start with the prefix "__gnaw__" to help prevent
+subroutine colisions.
 
 All parse level commands should manipulate text based on markers.
 
+No user-level or grammar-level commands are currently supported.
+You can always call the __gnaw__* functions, but they are
+currently subject to change.
 
-Getting text between two markers will get the text 
-AT the start marker
-and include all the text up to but BEFORE the stop marker.
+=head2 Generating the Parser
 
-This is because the current marker is always at the text ABOUT TO
-be processed.
+tbd
+
 
 =cut
 

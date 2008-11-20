@@ -1,0 +1,47 @@
+#!/usr/bin/perl -w
+
+use warnings;
+use strict;
+use Data::Dumper;
+
+
+my $fname='./MANIFEST';
+
+system("rm -f $fname") == 0 or die "ERROR: could not rm ./MANIFEST";
+
+my $out;
+unless(open($out, '>'.$fname)) {
+	die "ERROR: could not open '$fname' for write";
+}
+
+while(<DATA>) {
+	my $line = $_;
+
+	$line =~ s{\s}{}g;
+
+	next if($line eq '');
+
+	next if($line =~ m{\A\#});
+
+	print $out "$line\n";
+}
+
+my @testnames = `ls ./t/*.t`;
+
+#print Dumper \@testnames;
+
+foreach my $test (@testnames) {
+	$test=~s{\n}{};
+	print $out "$test\n";
+}
+
+
+__DATA__
+Changes
+MANIFEST
+Makefile.PL
+README
+genmanifest.pl.script
+lib/Parse/Gnaw.pm
+lib/Parse/Gnaw/Decomment.pm
+

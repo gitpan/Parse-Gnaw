@@ -2,6 +2,8 @@
 
 use Test::More 'no_plan';
 
+use lib 'lib';
+
 use Parse::Gnaw;
 
 my $grammar;
