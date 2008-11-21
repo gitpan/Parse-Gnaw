@@ -16,4 +16,18 @@ like
 This is a BETA release.
 
 
+0.24	2008-11-20
+
+Recoded the markers so that they are unique elements
+in the text linked list. adding a marker inserts a
+new element into the linked list. This allows
+different functions to keep their markers as needed.
+
+Finally got the "get" function working for complex
+grammars with many "get" calls.
+
+Created a "c" function which is a "capture" function.
+It is a simplified version of "get" in that the user
+does not have to provide a variable.
+
 

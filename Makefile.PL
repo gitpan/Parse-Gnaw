@@ -6,7 +6,7 @@ WriteMakefile(
     NAME                => 'Parse::Gnaw',
     AUTHOR              => 'Greg London <email@greglondon.com>',
     VERSION_FROM        => 'lib/Parse/Gnaw.pm',
-    ABSTRACT_FROM       => 'lib/Parse/Gnaw.pm',
+    ABSTRACT_FROM       => 'lib/Parse/Gnaw.pod',
     PL_FILES            => {},
     PREREQ_PM => {
         'Test::More' => 0,

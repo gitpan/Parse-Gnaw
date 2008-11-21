@@ -43,5 +43,6 @@ Makefile.PL
 README
 genmanifest.pl.script
 lib/Parse/Gnaw.pm
+lib/Parse/Gnaw.pod
 lib/Parse/Gnaw/Decomment.pm
 
