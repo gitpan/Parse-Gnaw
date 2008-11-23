@@ -742,27 +742,18 @@ in perl regular expressions.
 =head2 c (capture)
 
 For short grammars or regular expressions, the "get" function might be
-a bit of needless overhead. For those who want to save a bit of typing
-and for those who are familiar with the perl regular expression 
-convention of using the numbered variables to hold captured data, the
-"c" function provides similar functionality to the capturing parens.
+a bit of needless overhead. For those who want to save a bit of typing, 
+the "c" function is available.
 
-The "c" function is a wrapper around the "get" function.
-The difference is that the first parameter of the "get" function
-is removed in the "c" function. Internally the "c" function
-passes into "get" a subroutine specific to "c" which assigns the
-captured results to some Parse::Gnaw numbered variables. Since 
-the numbered variables ($1,$2,$3,etc) are read only, the capture 
-variables in Parse::Gnaw are similar, but with a tweak:
+The "c" function is somewhat like "capture parens" in perl regular 
+expressions in that it captures whatever that matches inside the
+parens and puts it into a numbered variable. The "c" function uses
+numbered variables that look like this:
 
 	$c1 $c2 $c3 and so on.
 
 You can have up to 99 capture variables. The variables are declared
 and imported into your namespace when you use the Parse::Gnaw package.
-
-The number in the variable name is determined the same way that the
-numbered variables are determined in perl regular expressions: by
-counting the left hand parenthesis, and by counting from left to right.
 
 An exmaple using the C function might look like this:
 
@@ -784,9 +775,48 @@ An exmaple using the C function might look like this:
 	ok($c7 eq 'd', 		"checking c7 ");
 	ok($c8 eq 'e', 		"checking c8 ");
 	
-If you think of the "c" function as capturing parens from perl regular
-expressions, then the "c" function will capture data to the corresponding
-variable.
+
+One significant difference between "c" numbered variables and 
+perl regular expression capture parens is that the "c" function
+puts the captured results into the numbered variable that 
+corresponds to the number of left parens that actually match
+the particular string being parsed.
+
+This shows up when your grammar uses the "a" (alternation) function.
+In the below example, we have a grammar that uses an alternation to
+look for one of two possible sentences, and then capture different
+bits of each sentence. 
+
+
+	$grammar = parse( 
+		a(  
+			['hello', c('world'), 'my', 'name', 'is', c(something)],
+			['howdy', c(something)]
+		) 
+	
+	);
+
+	ok($grammar->('hello world my name is Alice')==1, "1 match");
+
+	ok($c1 eq 'world', 'c1 is world');
+	ok($c2 eq 'Alice', 'c2 is alice');
+
+	ok($grammar->('howdy Bob')==1, "1 match");
+		
+	ok($c1 eq 'Bob', 'c1 is Bob');
+
+With the first string we parse, the first alternate matches, therefore
+the first "c" function is assigned to "$c1" and the second "c" function
+is assigned to "$c2". 
+
+With the second string we parse, the second alternate matches and 
+the c(something) function after 'howdy' is assigned to "$c1".
+The two "c" functions in the first alternate were not part of the 
+correct interpretation, and therefore were not used to count the
+numbered variables.
+
+
+
 
 =head2 now versus defer
 

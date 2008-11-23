@@ -5,7 +5,7 @@
 1; 
 { 
 	package Parse::Gnaw; 
-	our $VERSION = '0.24'; 
+	our $VERSION = '0.25'; 
 
 	use Exporter;
 	@ISA = qw( Exporter );
@@ -2331,7 +2331,7 @@ sub __gnaw__get {
 
 
 
-our @GNAW;
+our @GNAW; 
 
 sub __gnaw__c_callback {
 	my $string = shift(@_);
@@ -2348,6 +2348,8 @@ sub __gnaw__c_callback {
 }
 
 sub c {
+	push(@__gnaw__array_of_get_initializers_so_far, sub{@GNAW=();} );
+
 
 	return get(\&__gnaw__c_callback, @_);
 
