@@ -29,6 +29,10 @@ lib/Parse/Gnaw/Decomment.pm
 ./t/100_650_multi_c.t
 ./t/100_660_multi_c.t
 ./t/100_670_c_with_alternate.t
+./t/100_700_modify.t
+./t/100_900_swap.t
+./t/100_910_swap.t
+./t/100_920_swap.t
 ./t/200_100_combinations.t
 ./t/200_200_combinations.t
 ./t/boilerplate.t

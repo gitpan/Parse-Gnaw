@@ -5,7 +5,7 @@
 1; 
 { 
 	package Parse::Gnaw; 
-	our $VERSION = '0.25'; 
+	our $VERSION = '0.26'; 
 
 	use Exporter;
 	@ISA = qw( Exporter );
@@ -23,6 +23,10 @@
 		
 
 	 );
+
+	# when you "commit", this controls number of letters you let hang around
+	# so that the next grammar component can look back if it wants to.
+	our $GNAW_DEFAULT_PEEKBACK_WINDOW=1;
 }  
 1;
 
@@ -438,21 +442,21 @@ sub __gnaw__call_all_callbacks_from_beginning_to_current_element { # including c
 
 # this assumes you've already called any callbacks
 sub __gnaw__delete_all_elements_from_beginning_to_just_prior_to_current_element {
+	my $peekback_window=shift(@_);
+
 	########GNAWMONITOR("__gnaw__delete_all_elements_from_beginning_to_just_prior_to_current_element BEGIN");
 	my $count;
 
 	# starting from current location,
-	# back up to the beginning of the line.
-	# don't go more than 10 characters
-	# and don't go past the beginning marker.
+	# back up the "peekback" number of characters.
+	# don't go past the beginning marker.
 	my $stop = $__gnaw__curr_text_element;
-	$count = 10;
+	$count = $peekback_window;
 	while( 	($count--) and  
 		($stop ne $__gnaw__head_text_element)
 	){
 		$stop = $stop->[__GNAW__PREV];
 	}
-
 
 	my $curr = $__gnaw__head_text_element;
 	my $next;
@@ -469,17 +473,91 @@ sub __gnaw__delete_all_elements_from_beginning_to_just_prior_to_current_element 
 	$stop->[__GNAW__PREV] = $__gnaw__head_text_element;
 
 	########GNAWMONITOR("__gnaw__delete_all_elements_from_beginning_to_just_prior_to_current_element END");
-	return;
+	return ;
 }
 
 
+
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# this scalar stores a subref that we call anytime we commit text.
+# when we commit text, it gets deleted from the linked list in memory.
+# just before we delete it, we pass it to this subroutine which 
+# does whatever it needs to do with the text.
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+our $__gnaw__callback_for_committed_text = undef;
+
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+sub __gnaw__committed_text_is_ignored {
+	$__gnaw__callback_for_committed_text = undef;
+}
+
+sub __gnaw__committed_text_sent_to_variable {
+	# pass in a reference to a variable, we'll create a callback that will append text to that variable.
+
+	my $varref = shift(@_);
+
+	unless(ref($varref) eq 'SCALAR') {
+		__gnaw__die("callback for committed text to variable must receive scalar ref");
+		die;
+	}
+
+	my $callback = sub {
+		# pass in string in first parameter
+		$$varref .= $_[0];
+
+		#warn "appending ".$_[0]." ";
+	};
+
+	$__gnaw__callback_for_committed_text = $callback;
+}
+
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
 sub __gnaw__commit_text_to_current_location {
+	my $peekback_window=shift(@_);
 	########GNAWMONITOR;
 	__gnaw__call_all_callbacks_from_beginning_to_current_element();
 	__gnaw__call_all_callbacks_from_beginning_to_current_element();
-	__gnaw__delete_all_elements_from_beginning_to_just_prior_to_current_element();
+
+	if(defined($__gnaw__callback_for_committed_text)) {
+		my $string = __gnaw__read_string_between_markers
+			($__gnaw__head_text_element, $__gnaw__curr_text_element);
+
+		$__gnaw__callback_for_committed_text->($string);
+	}
+
+	__gnaw__delete_all_elements_from_beginning_to_just_prior_to_current_element($peekback_window);
 	return;
 }
+
+
+sub __gnaw__flush_remaining_unparsed_text {
+
+	my $startmarker = __gnaw__create_new_marker_before_current_element();
+
+	if(defined($__gnaw__callback_for_committed_text)) {
+		my $string = __gnaw__read_string_between_markers
+			($startmarker, $__gnaw__tail_text_element);
+
+		$__gnaw__callback_for_committed_text->($string);
+	}
+
+	__gnaw__initialize_text_linked_list_to_empty();
+
+}
+
 
 #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 # text linked list handling subroutines.
@@ -2184,7 +2262,11 @@ sub defer {
 #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 sub commit {
-	return now(\&__gnaw__commit_text_to_current_location);
+	my $peekback_window=$Parse::Gnaw::GNAW_DEFAULT_PEEKBACK_WINDOW;
+	if(scalar(@_)>0) {
+		$peekback_window=shift(@_);
+	}
+	return now(sub{__gnaw__commit_text_to_current_location($peekback_window)});
 }
 
 
@@ -2196,12 +2278,13 @@ sub get {
 	my $callback;
 	my $initialize;
 
+	# return undef in callbacks for variables so we don't cause "get" to do a replace operation.
 	if(ref($first_parameter) eq 'SCALAR') {
 		my $initvalue = $$first_parameter;
-		$callback = sub { $$first_parameter = shift(@_); };
+		$callback = sub { $$first_parameter = shift(@_); return;};
 		$initialize = sub { $$first_parameter = $initvalue; }
 	} elsif (ref($first_parameter) eq 'ARRAY') {
-		$callback = sub { push(@$first_parameter, shift(@_)); };
+		$callback = sub { push(@$first_parameter, shift(@_)); return;};
 		$initialize = sub { @$first_parameter = (); };
 	} elsif (ref($first_parameter) eq 'CODE') {
 		$callback = $first_parameter;
@@ -2292,7 +2375,13 @@ sub __gnaw__get {
 				my $string = __gnaw__read_string_between_markers
 					($beginmarkercopy1,$endmarkercopy1);
 				########GNAWMONITOR("GET function, callback function, string is '$string', about to pass to user function '$user_call_back'");
-				$user_call_back->($string);
+				my $user_return_string = $user_call_back->($string);
+					if( defined($user_return_string) and (!(ref($user_return_string))) ) {
+
+					__gnaw__replace_text_between_markers_with_string 
+						($beginmarkercopy1,$endmarkercopy1, $user_return_string);
+				}
+
 			};
 
 			__gnaw__create_new_element_before_this_element( $beginmarkercopy1, __GNAW__CLLBCK_WHAT, $call_back_in_front_of_marker
@@ -2345,6 +2434,8 @@ sub __gnaw__c_callback {
 	#print "evalstr is '$evalstr'\n";
 
 	eval($evalstr);
+
+	return; # return undef so we don't cause "get" to do a replace operation.
 }
 
 sub c {
@@ -2354,6 +2445,8 @@ sub c {
 	return get(\&__gnaw__c_callback, @_);
 
 }
+
+
 
 #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -2417,7 +2510,7 @@ sub parse {
 			$__gnaw__processor_still_running=0;
 			$__gnaw__processor_succeeded=1;
 			########GNAWMONITOR(__gnaw__string_showing_user_current_location_in_text);
-			__gnaw__commit_text_to_current_location;
+			__gnaw__commit_text_to_current_location(0);
 		},
 	};
 
@@ -2463,9 +2556,6 @@ sub parse {
 		$__gnaw__processor_still_running=1;
 		$__gnaw__processor_succeeded=0;
 		$__gnaw__processor_instruction_pointer = $pars_init;
-
-
-
 
 		__gnaw__process_commands();
 
@@ -2538,7 +2628,7 @@ sub match {
 			$__gnaw__processor_still_running=0;
 			$__gnaw__processor_succeeded=1;
 			########GNAWMONITOR(__gnaw__string_showing_user_current_location_in_text);
-			__gnaw__commit_text_to_current_location;
+			__gnaw__commit_text_to_current_location(0);
 		},
 	};
 
@@ -2608,6 +2698,8 @@ sub match {
 		$__gnaw__processor_succeeded=0;
 		$__gnaw__processor_instruction_pointer = $match_init;
 
+		__gnaw__committed_text_is_ignored;
+
 		__gnaw__process_commands();
 
 		return $__gnaw__processor_succeeded;
@@ -2616,6 +2708,173 @@ sub match {
 	########GNAWMONITOR( "match command end");
 
 	return $call_back;
+}
+
+
+
+sub modify {
+	########GNAWMONITOR( "modify command begin");
+
+	my $stitcher=series(@_);
+
+	# once we've processed the parameters passed into 'modify',
+	# all the grammar components have been executed.
+	# this means we can now generate the callback to initialize
+	# all "get" variables and subroutines.
+	my $variableinitroutine = __gnaw__generate_initialization_routine_for_get_callbacks_so_far();
+
+	my $modify_init = {
+		opcode => 'modify_init',
+		coderef => sub {
+			$variableinitroutine->(); 
+
+			my $thisinstruction = __gnaw__get_current_instruction_pointer();
+			my $nextinstruction = __gnaw__given_instruction_return_next_instruction($thisinstruction);
+			__gnaw__move_current_instruction_pointer($nextinstruction);
+		},
+	};
+
+	my $modify_pattern;
+	$modify_pattern = {
+		opcode => 'modify_pattern',
+		coderef => sub {
+			########GNAWMONITOR( "modify_pattern");
+			if(__gnaw__at_end_of_input_text) {
+				########GNAWMONITOR("modify pattern at end of string");
+				$__gnaw__processor_still_running=0;
+				$__gnaw__processor_succeeded=0;
+				return;
+			}
+
+			########GNAWMONITOR( "modify_pattern about to create fallback");
+			my $modify_failure = $modify_pattern->{modify_failure};
+			my $textmarker =  __gnaw__create_new_marker_before_current_element 
+				######## ( ' modify pattern function creating fallback marker ' )
+			;		
+			__gnaw__push_fallback_postition($modify_failure, $textmarker);
+
+			my $thisinstruction = __gnaw__get_current_instruction_pointer();
+			my $nextinstruction = __gnaw__given_instruction_return_next_instruction($thisinstruction);
+			__gnaw__move_current_instruction_pointer($nextinstruction);
+		},
+	};
+
+	my $modify_rejoinder = {
+		opcode => 'modify_rejoinder',
+		signifyendof => $modify_pattern,
+		coderef => sub{
+			# pop off the old fallback position, don't need it anymore.
+			my $instruction;
+			my $textmarker;
+			__gnaw__pop_fallback_postition($instruction, $textmarker);
+			__gnaw__delete_this_text_element($textmarker);
+
+			$__gnaw__processor_still_running=0;
+			$__gnaw__processor_succeeded=1;
+			########GNAWMONITOR(__gnaw__string_showing_user_current_location_in_text);
+			__gnaw__commit_text_to_current_location(0);
+		},
+	};
+
+	my $modify_failure = {
+		opcode => 'modify_failure',
+		signifyendof => $modify_pattern,
+		coderef => sub{
+			__gnaw__move_pointer_forward();
+			# we created a fallback, tried to parse, failed, and fellback to where we were
+			# If we can move current position forward, then do that and jump to modify pattern
+			# if we can't move current position forward, we're out of text, fail.
+			if(__gnaw__at_end_of_input_text) {
+				########GNAWMONITOR("modify failure at end of string");
+				$__gnaw__processor_still_running=0;
+				$__gnaw__processor_succeeded=0;
+			} else {
+				########GNAWMONITOR("modify failure NOT at end of string");
+				__gnaw__move_current_instruction_pointer($modify_pattern);
+			}
+		},
+	};
+
+	my $modify_cant_try_anymore = {
+		opcode => 'modify_cant_try_anymore',
+		signifyendof => $modify_pattern,
+		coderef => sub{
+			########GNAWMONITOR("modify_cant_try_anymore");
+			$__gnaw__processor_still_running=0;
+			$__gnaw__processor_succeeded=0;
+
+			# delete the current text marker
+			# we inserted it at the start of the "modify" function.
+			# move pointer to next element.
+			__gnaw__delete_this_text_element($__gnaw__curr_text_element);
+		},
+	};
+
+	$modify_init ->{rejoinder}=$modify_rejoinder;
+	$modify_pattern ->{rejoinder}=$modify_rejoinder;
+	$modify_pattern ->{modify_failure} = $modify_failure;
+
+	my $initstitcher = generate_stitcher(	  $modify_init, 		$modify_init);
+	my $modifystitcher = generate_stitcher(	  $modify_pattern,	$modify_pattern);
+	my $rejoinderstitcher = generate_stitcher($modify_rejoinder, 	$modify_rejoinder);
+
+	
+	# getfirst, getlast, setprevious, setnext
+	$initstitcher->('setnext', ($modifystitcher->('getfirst')));
+	$modifystitcher->('setprevious', ($initstitcher->('getlast')));
+
+	$modifystitcher->('setnext', ($stitcher->('getfirst')));
+	$stitcher->('setprevious', ($modifystitcher->('getlast')));
+
+	$stitcher->('setnext', ($rejoinderstitcher->('getfirst')));
+	$rejoinderstitcher->('setprevious', ($stitcher->('getlast')));
+
+
+	my $call_back = sub {
+		my ($string) = @_;
+
+		__gnaw__initialize_text_linked_list_to_empty();
+		__gnaw__insert_string_at_end_of_linked_list($string);
+
+		########GNAWMONITOR("\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nend string initialization\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n");
+
+		$__gnaw__processor_still_running=1;
+		$__gnaw__processor_succeeded=0;
+		$__gnaw__processor_instruction_pointer = $modify_init;
+
+		my $temp;
+		__gnaw__committed_text_sent_to_variable(\$temp);
+
+		__gnaw__process_commands();
+
+		if($__gnaw__processor_succeeded) {
+			__gnaw__flush_remaining_unparsed_text;
+			$_[0] = $temp;
+		}
+
+		return $__gnaw__processor_succeeded;
+	};
+
+	########GNAWMONITOR( "modify command end");
+
+	return $call_back;
+}
+
+
+sub swap {
+	my $callback = pop(@_);
+
+	unless(ref($callback) eq 'CODE') {
+		if(ref($callback)) {
+			__gnaw__die("ERROR: last parameter to swap must be a callback or a string");
+			die;
+		}
+
+		my $string = $callback.'';
+		$callback = sub{ return $string; };
+	}
+
+	return modify(get($callback, @_));
 }
 
 

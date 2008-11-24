@@ -31,3 +31,32 @@ It is a simplified version of "get" in that the user
 does not have to provide a variable.
 
 
+0.26	2008-11-20
+
+changed the "get" function so that callbacks can return
+a string and the return string will be used to replace
+the original text. return undef and no text will be changed.
+
+Created a "modify" top level function which is like 
+"match", but with the write protect turned off.
+if "get" changes the text, "modify" will write the
+new text back to the original variable.
+
+Created a generic callback taht will receive committed
+text. set it to undef to do nothing. Set it to a 
+callback that will append committed text to a variable.
+Could eventually create a callback that will take
+text and write it to a file or something.
+
+added a subroutine which will flush uncommitted text
+to the above mentioned subroutine so that the text
+after the matched portion still gets into the variable.
+
+created a "swap" function which looks like perls
+=~s/// function. Basically "swap" is a wrapper 
+that uses modify and get to implement its functionality.
+
+Added some more tests and updated the POD.
+
+
+
