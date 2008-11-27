@@ -5,7 +5,7 @@
 1; 
 { 
 	package Parse::Gnaw; 
-	our $VERSION = '0.26'; 
+	our $VERSION = '0.28'; 
 
 	use Exporter;
 	@ISA = qw( Exporter );
@@ -1913,6 +1913,13 @@ sub some { g([1], @_) }		# one or more
 sub anything  { any (thing) } 	# zero or more 'things'
 sub something { some(thing) }	# one or more 'things'
 
+
+# 0 or 1 of whatever. i.e. 
+# maybe('hello', 'there') 'Alice'
+# will look for "Alice" that might or might not be preceded by "hello" "there".
+sub maybe { g([0,1], @_) }	
+
+
 #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -2446,6 +2453,51 @@ sub c {
 
 }
 
+
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# more advanced grammar extensions
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+# "slist" separated list
+
+# standard separated list of items, last item not followed by separator
+# item, item, item  	=> separatedlist(item, ',')
+
+# standard separated list of items, last item may be followed by a separator or not.
+# item, item, item,  	=> separatedlist(item, ',', 1)
+
+# standard separated list of items, empty items allowed, last thing may be a separator
+# item,,,item,,item,,  	=> separatedlist(maybe(item), ',')
+
+sub slist {
+	my $item=shift(@_);
+	my $separator=shift(@_);
+
+	my $trailingseparatorallowed=0;
+
+	if(scalar(@_)) {
+		$trailingseparatorallowed=shift(@_);
+
+		unless( ($trailingseparatorallowed==1) or ($trailingseparatorallowed==0) ) {
+			__gnaw__die("Error: Third parameter to separatedlist must be a 1 or 0");
+		}
+	}
+
+	if(scalar(@_)) {
+		__gnaw__die("Error: separatedlist only takes max three parameters (item, separator, 1/0)");
+	}
+
+	my $extension;
+
+	if($trailingseparatorallowed){
+		# an item, followed by any number of (separator item) and maybe one separator at end
+		$extension = series( $item,  any($separator, $item), maybe($separator) );
+	} else {
+		# an item, followed by any number of ( separator item ) 		
+		$extension = series( $item, any($separator, $item) );
+	}
+
+}
 
 
 #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++

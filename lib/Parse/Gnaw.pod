@@ -3,8 +3,9 @@
 
 =head1 NAME
 
-Parse::Gnaw - Define a grammar and create a parser by calling 
-nothing but perl subroutines.
+Parse::Gnaw - An extensible parser, define grammars using subroutine calls,
+define your own grammar extensions by defining new subroutines, parse text
+in memory or from/to files or other streams.
 
 =head1 SYNOPSIS
 
@@ -83,6 +84,14 @@ The "qa" function (quoted alternation) takes a single string and splits it
 into individual words, also similar to perls "qw" function. The "qa" function
 then takes those individual words and creates an alternation that tries to 
 match any individual word in the string as a valid alternate.
+
+=head2 Extensible
+
+The grammars are defined by calling subroutines imported into your namespace 
+from Parse::Gnaw. You can define your own grammar components by declaring
+a subroutine that performs whatever preprocessing you want and generates
+whatever set of lower level components you want. Examples of this are
+provided later on in this pod file.
 
 =head2 BETA
 
@@ -622,7 +631,9 @@ for grouped bits of grammar.
 Shorcuts are provided for g([0],...) and g([1], ...), called 
 "any" and "some" respectively
 
-=head2 any and some functions
+=head2 any function
+
+=head2 some function
 
 Because greedy quantifiers of "zero or more" and "one or more" are fairly 
 common, shortcuts 'any' and 'some' have been provided.
@@ -638,7 +649,12 @@ grammar components.
 	# one or more of "hello" followed by "world"
 	$grammar = match( some('hello', 'world') );
 
-=head2 anything and something functions
+If you have trouble reading that just insert "some number of" for "some".
+And insert "any number of" for "any".
+
+=head2 anything function
+
+=head2 something function
 
 The character set "thing" matches any single character. The "any" and "some" 
 functions are quantifiers of zero or more and one or more. These two functions
@@ -652,6 +668,81 @@ You can use these in your grammars to make them slightly more readable.
 	# literal 'hello' followed by 1 or more characters, followed by
 	# literal 'how', literal 'are', and literal 'you'
 	$grammar = match( 'hello', something, 'how', 'are', 'you' );
+
+=head2 maybe function
+
+The maybe function is a shortcut that wraps the "g" function with the
+quantity hardcoded to [0,1]. This means whatever you put into the 
+"maybe" function is optional. It may be there or it may not and the
+parse will still pass.
+
+	$grammar = match('why', maybe('hello','there'), 'Alice');
+	ok($grammar->("why hello there Alice") == 1, 'match');
+	ok($grammar->("why Alice") == 1, 'match');
+	ok($grammar->("why hello Alice") == 0, 'no match');
+	ok($grammar->("why there Alice") == 0, 'no match');
+
+=head2 slist (separated list)
+
+Say you have a list of separated items, such as:
+
+	red, orange, yellow, green, blue, indigo, violet
+
+You might first try coding it up as:
+
+
+	sub color {qa("red orange yellow green blue indigo violet")}
+	sub comma {','}
+	$grammar=match(some(color, comma));
+
+The problem is this will require that the last color be followed by a comma:
+
+	red, green, blue,
+
+Many formally defined languages have comma separated lists, but do not allow
+a comma to follow the last item.
+
+The "slist" function allows you to define an item and a separator,
+and the resulting parser will look for items separated by separators, but
+will not look for a trailing separator after the last item. The general 
+format looks like this:
+
+	slist( item, separator )
+
+The "slist" function then returns a grammar component
+that will look for any of the following patterns.
+
+	item
+	item separator item
+	item separator item separator item
+	item (separator item)*
+
+If item is more than one grammar component, enclose it in square brackets
+to group it into an array reference. If the separator is more than one
+component, enclose it in square brackets to group it into an array reference.
+
+This example defines the item to be the word "color" followed by a color word.
+The separator is still a comma.
+
+	slist( [ 'color' qa('red green blue') ], ',' )
+
+The above example will match this text:
+
+	color red, color green, color blue
+
+If you allow a trailing comma, set the third parameter to a "1". 
+
+	slist( [ 'color' qa('red green blue') ], ',', 1 )
+
+The above example will match this text:
+
+	color red, color green, color blue,   # with or without that last comma
+
+If you allows empty items, enclose the item in a "maybe" function.
+Note that in this condition, the third parameter becomes irrelevant.
+
+	slist( maybe('color' qa('red green blue')), ',')
+
 
 =head2 get
 
@@ -947,16 +1038,129 @@ previous text from memory.
 
 	$grammar = match(some('keyword', commit, 'blah', 'blah', 'blah'));
 
-=head1 EXAMPLES
+=head1 EXTENSIBLE
+
+Since the grammar components are built up as subroutines, it is possible
+to create your own grammar components as subroutines that call Parse::Gnaw
+subroutines and encapsulate some higher level functionality or provide
+shortcuts for you in your grammars.
+
+This means that you are not restricted to writing your grammars using only
+the low level components available in some parser language. If your grammar
+repeats the same complex pattern over and over, you can put that patten into
+a subroutine and call the subroutine wherever you need it.
+
+Note that this is better than a grammar that supports "rules", because 
+extensibility means you can pass other grammar components into your subroutine
+and manipulate them however you want before generating the final parsing logic.
+
+=head2 ccdigit, ccword, ccspace
+
+An simple example of extensibility is how the character class shortcuts 
+for digits and so on are extensions of the basic underlying "cc" and 
+"CC" functions, rather than being their own grammar component. Here is 
+how these shortcuts could be declared:
+
+	sub ccdigit { cc('0-9') }
+	sub CCDIGIT { CC('0-9') }
+
+	sub ccword { cc('a-zA-Z0-9_') }
+	sub CCWORD { CC('a-zA-Z0-9_') }
+
+	sub ccspace { cc("\n \t \r \f") }
+	sub CCSPACE { CC("\n \t \r \f") }
+
+If you wanted to create even shorter versions of the above shortcuts, you 
+could declare them as subroutines in your own code and then call them
+in your grammar. For example, if you want to use the letter 'd' every time
+you want a digit character class, you could declare the following in your code:
+
+	sub d { ccdigit }
+
+=head2 qa
+
+Another example of a grammar extension is the "qa" function. The "a" function
+is a low level grammar component for alternations. The "qa" function is an 
+extension of "a". It's declaration looks like this:
+
+	sub qa {
+		my ($string)=@_;
+		my @words = __gnaw__separate_string_into_words($string);
+		my $stitcher = a(@words);
+		return $stitcher;
+	}
+
+The "qa" function takes in a single scalar string, splits that string up 
+into individual words based on whitespace, and creates an array of words.
+The "qa" function then passes this array of words into the "a" function and
+returns the stitcher that it creates.
+
+The "qa" function isn't something you can do in a normal parser "rule" because
+you're passing in a nonstandard parameter, preprocessing it, converting it to
+standard grammar building blocks, and then returning the parser code.
+
+=head2 any some anything something maybe
+
+Another example of extensions are the quantifier shortcut functions. 
+The low level components are the "g" (greedy quantifier)
+and "thing" (any single character) components. From there, we declare the
+extensions:
+
+	sub any  { g([0], @_) }		# zero or more
+	sub some { g([1], @_) }		# one or more
+
+	sub anything  { any (thing) } 	# zero or more 'things'
+	sub something { some(thing) }	# one or more 'things'
+
+	sub maybe { g([0,1], @_) }
+
+The "any" and "some" functions are simple extensions of the "g" function, 
+taking whatever parameters are passed into "any" and "some" and passing
+them directly onto the "g" function. Instead of preprocessing the parameters
+like we did in the "qa" function, instead we hardcode some default values 
+for the quantifier "min" value. i.e. the [0] and [1] parts of the code
+passed into the "g" function.
+
+=head2 slist
+
+The "slist" function is a more complex extension of basic 
+grammar components. The "slist" subroutine can be simplified
+to something like this:
+
+	sub slist {
+		my($item,$separator,$trailingseparatorallowed) = @_;
+		my $extension;
+
+		if($trailingsepatorallowed){
+			# an item, 
+			# followed by any number of (separator item) 
+			# and maybe one separator at end
+			$extension = series( $item,  any($separator, $item), maybe($separator) );
+		} else {
+			# an item, followed by any number of ( separator item ) 		
+			$extension = series( $item, any($separator, $item) );
+		}
+
+		return $extension;
+	}
+	
+The "slist" function is also not something that can be supported by normal 
+parser "rules". The "slist" subroutine is called during the "generation" 
+phase, before the parser is built, and based on the parameters passed in,
+it decides what sort of grammar to build for a separated list.
+
+
+
+=head1 FULL GRAMMAR EXAMPLES
 
 =head2 trekisms
 
 The following grammar shows how one might identify dialogue and 
 attribute it to a particular fictional character. 
 
-The "attributeline" subroutine allowed us to bundle the functionality
-of the output into one spot and then easily use that functionality 
-at several different points in the grammar.
+The "attributeline" subroutine is basically an extension which allows 
+us to bundle the functionality of the output into one spot and then 
+easily use that functionality at several different points in the grammar.
 
 	my $captured="";
 
@@ -1079,10 +1283,70 @@ at several different points in the grammar.
 
 The above example is included as a test in the t directory of the tarball from CPAN.
 
+Note that when we call the "attributeline" extension, we pass in a string that 
+isn't part of the grammar to be searched for in the text, it is part of the
+text output. In the line below, we call "attributeline('McCoy', a(...))", 
+but we aren't looking for "McCoy" in the text being parsed, we pass in "McCoy"
+so we can use that string in the formatted output.
+
+	sub mccoy_isms {
+		attributeline('McCoy', a(mccoy_job, mccoy_diag, mccoy_rant1)) 
+	}
+
 	
 =head1 NOT IMPLEMENTED YET
 
+=head2 position markers
 
+start of text (the perl regexp equivalent of \A) isn't needed in Parse::Gnaw.
+Instead, call the "parse" function, which only will look at the start of the text.
+
+The end of text (perl \Z) is needed to allow grammars to be written that
+define an entire text. Otherwise, "parse" or "match" will match as far as they can,
+then stop. If there is any text left, they still pass. If you want them to match
+the entire string, then end your grammar with the "eot" function.
+
+The word boundary position marker is also needed. It will match on four different
+situations:
+
+	1) at a transition from a \w character to a \W character
+
+	2) at a transition from a \W character to a \w character
+
+	3) at the beginning of the string
+
+	4) at the end of the string
+
+
+=head2 skip, noskip
+
+need to turn skipping on and off somehow. need to go back to whatever it was
+if a parse fails, no matter where it fails. 
+
+I think we default to skip, and then have the "noskip" be an enclosing thing,
+
+	$grammar = match('a', noskip('b', 'c', 'd'), 'e');
+
+=head2 tok (token)
+
+tok might be a shortcut for "noskip".
+
+It might also try to detect if the thing passed in is \w, and if so,
+put word boundary position markers on the front and back of the token.
+
+Or maybe we have a mode where all literals that begin and end in \w 
+all get turned into tokens with word boundary position markers at 
+start and end.
+
+
+=head2 matchall swapall
+
+The match and swap functions only operate on the first instance 
+in the string that matches. 
+
+If you want to match, and then keep going, or if you want to 
+swap something and keep going, use the matchall and swapall
+function.
 
 =head2 recursive
 
@@ -1115,13 +1379,6 @@ the "recursive" function.
 	sub expression{ a([ '(' recursive(\&expression) ')'], 'a+b') }
 
 	my $grammar = match(expression);
-
-
-
-=cut 
-
-
-
 
 
 =head1 INTERNALS
