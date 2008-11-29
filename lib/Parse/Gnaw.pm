@@ -5,7 +5,7 @@
 1; 
 { 
 	package Parse::Gnaw; 
-	our $VERSION = '0.28'; 
+	our $VERSION = '0.29'; 
 
 	use Exporter;
 	@ISA = qw( Exporter );
@@ -491,22 +491,22 @@ sub __gnaw__delete_all_elements_from_beginning_to_just_prior_to_current_element 
 #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
-our $__gnaw__callback_for_committed_text = undef;
+our $__gnaw__flush = undef;
 
 #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
-sub __gnaw__committed_text_is_ignored {
-	$__gnaw__callback_for_committed_text = undef;
+sub __gnaw__flushed_text_is_ignored {
+	$__gnaw__flush = undef;
 }
 
-sub __gnaw__committed_text_sent_to_variable {
+sub __gnaw__flushed_text_is_sent_to_variable {
 	# pass in a reference to a variable, we'll create a callback that will append text to that variable.
 
 	my $varref = shift(@_);
 
 	unless(ref($varref) eq 'SCALAR') {
-		__gnaw__die("callback for committed text to variable must receive scalar ref");
+		__gnaw__die("__gnaw__flushed_text_is_sent_to_variable must receive scalar ref");
 		die;
 	}
 
@@ -517,8 +517,33 @@ sub __gnaw__committed_text_sent_to_variable {
 		#warn "appending ".$_[0]." ";
 	};
 
-	$__gnaw__callback_for_committed_text = $callback;
+	$__gnaw__flush = $callback;
+
+	return;
 }
+
+sub __gnaw__flushed_text_is_appended_to_file {
+	# pass in a filename, we'll create a callback that will append to file
+
+	my $filename = shift(@_);
+
+	unless(-e $filename) {
+		__gnaw__die("ERROR: __gnaw__flushed_text_is_appended_to_file must receive a filename that exists");
+	}
+
+	my $outfh;
+
+	open($outfh, '>>'.$filename) or __gnaw__die("ERROR: unable to open file for append ($filename)");
+
+	my $callback = sub {
+		print $outfh $_[0];
+	};
+	
+	$__gnaw__flush = $callback;
+
+	return $outfh;
+}
+
 
 #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -531,11 +556,11 @@ sub __gnaw__commit_text_to_current_location {
 	__gnaw__call_all_callbacks_from_beginning_to_current_element();
 	__gnaw__call_all_callbacks_from_beginning_to_current_element();
 
-	if(defined($__gnaw__callback_for_committed_text)) {
+	if(defined($__gnaw__flush)) {
 		my $string = __gnaw__read_string_between_markers
 			($__gnaw__head_text_element, $__gnaw__curr_text_element);
 
-		$__gnaw__callback_for_committed_text->($string);
+		$__gnaw__flush->($string);
 	}
 
 	__gnaw__delete_all_elements_from_beginning_to_just_prior_to_current_element($peekback_window);
@@ -547,11 +572,11 @@ sub __gnaw__flush_remaining_unparsed_text {
 
 	my $startmarker = __gnaw__create_new_marker_before_current_element();
 
-	if(defined($__gnaw__callback_for_committed_text)) {
+	if(defined($__gnaw__flush)) {
 		my $string = __gnaw__read_string_between_markers
 			($startmarker, $__gnaw__tail_text_element);
 
-		$__gnaw__callback_for_committed_text->($string);
+		$__gnaw__flush->($string);
 	}
 
 	__gnaw__initialize_text_linked_list_to_empty();
@@ -699,10 +724,27 @@ sub __gnaw__replace_text_between_markers_with_string { #(startmarker, stopmarker
 #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
+# this subroutine gets called when we hit end of text in memory and we
+# need to see if we can add anymore text. Default behaviour is to process
+# the whole text in memory. Assign a subroutine reference to this that will
+# read new text from input file or stream or whatever if you want that
+# sort of functionality.
+#
+# If you do override this callback, you will probably want to use 
+#	__gnaw__insert_string_at_end_of_linked_list()
+# to add text to linked list.
+our $__gnaw__sip = sub{};
+
 sub __gnaw__at_end_of_input_text { # return boolean
 	########GNAWMONITOR;
 	if($__gnaw__curr_text_element eq $__gnaw__tail_text_element) {
-		return 1;
+		$__gnaw__sip->();
+	
+		if($__gnaw__curr_text_element eq $__gnaw__tail_text_element) {
+			return 1;
+		} else {
+			return 0;
+		}
 	} else { 
 		return 0;
 	}
@@ -719,7 +761,8 @@ sub __gnaw__move_pointer_forward { # move forward to first text element. delete 
 	########GNAWMONITOR ("MOVE POINTER FORWARD, getting next");
 	$__gnaw__curr_text_element = $__gnaw__curr_text_element->[__GNAW__NEXT];
 
-	# delete any element that is not a letter. markers, callbacks, etc. all go
+	# delete any element that is not a letter. 
+	# markers, callbacks, etc. are all to be deleted at this time.
 	# move forward to first letter element.
 	while(	
 		    ($__gnaw__curr_text_element ne $__gnaw__tail_text_element) 
@@ -1364,14 +1407,14 @@ sub __gnaw__inv_cc {
 
 # character class shortcuts
 
-sub ccdigit { cc('0-9') }
-sub CCDIGIT { CC('0-9') }
+sub dgt { cc('0-9') }
+sub DGT { CC('0-9') }
 
-sub ccword { cc('a-zA-Z0-9_') }
-sub CCWORD { CC('a-zA-Z0-9_') }
+sub wrd { cc('a-zA-Z0-9_') }
+sub WRD { CC('a-zA-Z0-9_') }
 
-sub ccspace { cc("\n \t \r \f") }
-sub CCSPACE { CC("\n \t \r \f") }
+sub spc { cc("\n \t \r \f") }
+sub SPC { CC("\n \t \r \f") }
 
 #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 # "thing" function is equivalent to perl regular expression '.' 
@@ -2750,7 +2793,7 @@ sub match {
 		$__gnaw__processor_succeeded=0;
 		$__gnaw__processor_instruction_pointer = $match_init;
 
-		__gnaw__committed_text_is_ignored;
+		__gnaw__flushed_text_is_ignored;
 
 		__gnaw__process_commands();
 
@@ -2895,7 +2938,7 @@ sub modify {
 		$__gnaw__processor_instruction_pointer = $modify_init;
 
 		my $temp;
-		__gnaw__committed_text_sent_to_variable(\$temp);
+		__gnaw__flushed_text_is_sent_to_variable(\$temp);
 
 		__gnaw__process_commands();
 

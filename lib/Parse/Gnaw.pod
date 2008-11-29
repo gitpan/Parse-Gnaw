@@ -3,8 +3,8 @@
 
 =head1 NAME
 
-Parse::Gnaw - An extensible parser, define grammars using subroutine calls,
-define your own grammar extensions by defining new subroutines, parse text
+Parse::Gnaw - An extensible parser. Define grammars using subroutine calls.
+Define your own grammar extensions by defining new subroutines. Parse text
 in memory or from/to files or other streams.
 
 =head1 SYNOPSIS
@@ -205,48 +205,10 @@ grammars. These top level functions return code references which are your
 grammar. You then dereference these code references to call the grammar
 and pass in the string you want to parse.
 
-Only top level functions return grammar code references. They include:
-
-	match	Similar to perls =~ m/// regexp function.
-		Find the first match of the grammar in the string.
-		Skip any text until we find a match.
-
-	swap	Similar to perls =~s/// regexp function.
-		Define a pattern, and define either a replacement string
-		or a subroutine which will receive the original text and
-		return a replacement string. 
-
-	parse	Similar to perls =~ m/\A// regexp function.
-		Parse the string from the beginning only. 
-		Do not scan through text looking for a match.
-
-	modify	Allow grammars to modify text in flight.
-		Note that the "modify" function does not modify anything
-		unless the user calls the "get" function and defines 
-		what gets modified. Think of "modify" as "match" but
-		with the "write protect" bit turned off.
-
-These functions return code references that are the grammar, code references
+Only top level functions return grammar code references. They include
+"match", "swap", "parse", and "modify". These functions return code 
+references that are the grammar, code references
 you dereference to run the grammar on a string.
-
-match examples:
-
-	my $grammar = match('hello', 'world');
-	ok($grammar->("these are not the droids you are looking for")==0, 'no match');
-
-swap examples:
-
-	# swap 'Alice' for 'Bob', use string literal
-	my $input = "hello Alice ! How are you?";
-	ok(swap('Alice', 'Bob') -> ($input)==1, "checking match was found");
-	ok($input eq 'hello Bob ! How are you?', "checking substitution/swap took place");
-
-
-	# swap a phone number for the same number, but with asterisks around it.
-	my $input = "please call 555-1212 for more details";
-	swap(some(ccdigit),'-',some(ccdigit), sub{return "***".shift(@_)."***";}) -> ($input);
-	ok($input eq 'please call ***555-1212*** for more details');
-
 
 Low level functions return code references that are called "stitchers". 
 These are low level subroutines used by Parse::Gnaw to build up the grammar. 
@@ -261,6 +223,116 @@ coderef from a low level function, your script will die with strange errors.
 
 Always make sure you use a top level function as your final function 
 of your grammar.
+
+
+=head1 TOP LEVEL FUNCTIONS
+
+=head2 match
+
+The "match" function is similar to perls =~ m/// regexp function.
+
+Since "m" is a reserved perl function, we had to use a different name.
+
+The "match" function will find the first match of the grammar in the string.
+It will start at the first character in the string, attempt to find a match
+from there, and if it fails to find a match, it will move forward one character
+and attempt to find a match there. If no match is found, it will move forward
+one character and try the pattern, repeating until it reaches the end of the
+string.
+
+match examples:
+
+	my $grammar = match('hello', 'world');
+	ok($grammar->("these are not the droids you are looking for")==0, 'no match');
+	ok($grammar->("why did you say hello world just now?")==1, 'match found');
+	
+
+=head2 swap
+
+The "swap" function is similar to perls =~ s/// regexp function.
+
+Since "s" is a reserved perl function, we had to use a different name.
+
+The "swap" function allows you to define a pattern to look for in the 
+string and allows you to define some replacement text if a match is found.
+The replacement text can be defined as a literal string or as a callback.
+
+The last parameter in the "swap" function is either a string or a subroutine reference.
+This last parameter will be used as the replacement value. All other parameters
+are low level functions to define the pattern.
+
+If you want to swap "Alice" for "Bob", then just do this:
+
+	swap('Alice', 'Bob')
+
+A working example might look like this:
+
+	my $input = "hello Alice ! How are you?";
+
+	# find 'Alice' and replace with 'Bob', use string literal
+	ok(swap('Alice', 'Bob') -> ($input)==1, "checking match was found");
+
+	ok($input eq 'hello Bob ! How are you?', "checking substitution/swap took place");
+
+
+If the last parameter to the "swap" funciton is a subroutine reference, then if 
+a match is found, then the parser will call the subroutine, pass the matching value
+into the subroutine as the first parameter, and whatever that subroutine returns
+is the replacement text the parser will use.
+
+You could return a hardcoded value:
+
+	swap('Alice', sub{'Bob'})
+	
+You could take the matching value, and modify it:
+
+	swap('Alice', sub{uc(shift(@_))})
+
+A working example might look like this:
+
+	my $input = 'Hello Alice';
+	ok(swap('Alice', sub{uc(shift(@_))})->($input)==1, "match found");
+	ok($input eq 'Hello ALICE', "text swap occurred");
+
+Here's another swap example:
+
+	# example 2
+	my $input = "please call 555-1212 for more details";
+
+	# find a phone number and replace with phone number surrounded by asterisks. Use subroutine.
+	swap(some(dgt),'-',some(dgt), sub{return "***".shift(@_)."***";}) -> ($input);
+	ok($input eq 'please call ***555-1212*** for more details');
+
+=head2 modify
+
+The "modify" function operates similar to the "match" function in that it starts
+at the beginning of the text, tries to find a pattern match, and moves forward
+through the text until it finds a match.
+
+The difference between "modify" and "match" is that "modify" allows the "get" 
+function to modify the text in flight. If the "get" function returns anything
+other than undef, the original text will be modified to whatever the "get"
+function return value is. 
+
+Think of "modify" as "match" but with the "write protect" bit turned off. And think
+of "get" as the way to "write" new text.
+
+=head2 parse
+
+The "parse" function is similar to perls  =~ m/\A ... / regular expression function.
+The "parse" function only attempts to match the pattern starting at the beginning of
+the text. It does not move forward through the string to find a match. 
+
+	$grammar = parse('Alice');
+
+	ok($grammar->('Alice Bob Charlie')==1, "match found");
+	ok($grammar->('Bob Alice Charlie')==0, "match not found");
+
+
+If you're defining a grammar to parse a file or some formal language, 
+you probably want to use "parse" instead of "match".
+
+=head1 LOW LEVEL FUNCTIONS
 
 =head2 Literals
 
@@ -486,11 +558,11 @@ the first character in the string.
 
 Character class shortcuts are provided for common character classes.
 
-	ccdigit => 0-9
-	ccword => a-zA-Z0-9_
-	ccspace => \n \t \r \f or literal space
+	dgt => 0-9
+	wrd => a-zA-Z0-9_
+	spc => \n \t \r \f or literal space
 
-	$grammar = match( ccdigit ); # any single digit. 0,1,2,3,4,5,6,7,8,9
+	$grammar = match( dgt ); # any single digit. 0,1,2,3,4,5,6,7,8,9
 
 Note that the "cc" function and its related shortcuts are one of the functions
 in Parse::Gnaw that do NOT handle array references, nor do they handle multiple
@@ -511,11 +583,11 @@ function is lower case.
 
 Short cuts are provided for common inverted character classes:
 
-	CCDIGIT => anything BUT 0-9
-	CCWORD => anything BUT a-zA-Z0-9_
-	CCSPACE => anything BUT \n \t \r \f or literal space
+	DGT => anything BUT 0-9
+	WRD => anything BUT a-zA-Z0-9_
+	SPC => anything BUT \n \t \r \f or literal space
 
-	$grammar = match( CCDIGIT ); # any single character EXCEPT a digit
+	$grammar = match( DGT ); # any single character EXCEPT a digit
 
 Note that the "CC" function has the same parameter restrictions as "cc".
 Only one string containing the characters defining the NOT character class.
@@ -612,10 +684,10 @@ the rest of the grammar.
 	$grammar = match( g([17], cc('gatc')) ); 
 
 	# one or more "word" characters
-	$grammar = match( g([1], ccword) );
+	$grammar = match( g([1], wrd) );
 
 	# zero or more "digit" characters
-	$grammar = match( g([0], ccdigit) );
+	$grammar = match( g([0], dgt) );
 
 	# at least 3 and up to 8 letters
 	$grammar = match( g([3,8], cc('a-zA-Z')));
@@ -638,9 +710,9 @@ Shorcuts are provided for g([0],...) and g([1], ...), called
 Because greedy quantifiers of "zero or more" and "one or more" are fairly 
 common, shortcuts 'any' and 'some' have been provided.
 
-	$grammar = match( any(ccdigit) ); # zero or more digits
+	$grammar = match( any(dgt) ); # zero or more digits
 
-	$grammar = match( some(ccword) ); # one or more word characters.
+	$grammar = match( some(wrd) ); # one or more word characters.
 
 The "any" and "some" functions take any number of input parameters,
 and the parameters can be string literals, array references, and other
@@ -757,12 +829,12 @@ The first parameter of the "get" function can be one of several possible things.
 
 (3) a subroutine reference. 
 
-If the first parameter is a scalar reference, the scalar will be used 
+If the first parameter is a (1) scalar reference, the scalar will be used 
 to hold whatever matched the "get" function.
 
 	my $name;
 
-	$grammar = match('hello', get(\$name, some(ccword)), '!' );
+	$grammar = match('hello', get(\$name, some(wrd)), '!' );
 
 	$grammar->('hello Alice !');
 
@@ -778,7 +850,7 @@ this value is overwritten only if a match occurs.
 
 	my $name;
 
-	$grammar = match('hello', get(\$name, some(ccword)), '!' );
+	$grammar = match('hello', get(\$name, some(wrd)), '!' );
 	$grammar->('hello Alice !');
 	$grammar->('hello Bob !');
 	$grammar->('hello Charlie !');
@@ -787,14 +859,14 @@ this value is overwritten only if a match occurs.
 
 	> name is 'Charlie'
 
-If the first parameter is an array reference, then every match
+If the first parameter is (2) an array reference, then every match
 by the "get" function will get pushed into the array. If you call
 the same grammar multiple times, the array is emptied at the start
 of parsing. Note this behaviour is different from scalars.
 
 	my @name;
 
-	$grammar = match(some('hello', get(\@name, some(ccword)), '!') );
+	$grammar = match(some('hello', get(\@name, some(wrd)), '!') );
 	$grammar->('hello Alice ! hello Bob ! hello Charlie !');
 
 	print "name is ". Dumper \@name;
@@ -805,7 +877,7 @@ of parsing. Note this behaviour is different from scalars.
 	> 	'Charlie'
 	> ];
 
-If the first parameter is a subroutine reference, the parser will
+If the first parameter is (3) a subroutine reference, the parser will
 call this subroutine on every match and pass in as the first parameter
 the value of the string that matched. You may then do whatever you
 wish with this string inside the subroutine you define.	
@@ -814,14 +886,23 @@ wish with this string inside the subroutine you define.
 		my ($string) = @_;
 		# write $string to a file, or whatever
 		print "called subroutine, received '$string'\n";
+		return;
 	};
 
-	$grammar = match('hello', get($name, some(ccword)), '!' );
+	$grammar = match('hello', get($name, some(wrd)), '!' );
 
 	$grammar->('hello Alice !');
 
 	> called subroutine, received 'Alice'
 
+NOTE: When you use a subroutine reference with "get", you should always
+finish the subroutine with a "return;" statement. If you're subroutine
+returns anything other than undef, (and it will if the last expression
+is anything other than undef), then Parse::Gnaw will treat that return
+value as a replacement string and substitute that string in place of the
+string captured by "get".
+
+See the "get with modify" section.
 
 The remaining parameters of the "get" function are one or more 
 grammar components. Literals, character classes, alternations, 
@@ -869,7 +950,7 @@ numbered variables that look like this:
 You can have up to 99 capture variables. The variables are declared
 and imported into your namespace when you use the Parse::Gnaw package.
 
-An exmaple using the C function might look like this:
+An exmaple using the C function might look like th"Hello Alice, how are you?"is:
 
 	$grammar = parse( 
 		c( 
@@ -929,22 +1010,46 @@ The two "c" functions in the first alternate were not part of the
 correct interpretation, and therefore were not used to count the
 numbered variables.
 
-=head2 x (exchange inline)
+=head2 get with modify
 
-The "x" function is used to exchange text in the string being parsed with
-some other text supplied by the user. The user provides a subroutine reference
-as the first parameter. If the grammar matches, the "x" function will take 
-the text that matched, pass it into the users code reference, and then
-whatever that subroutine call returns will replace the matching text.
+The "get" function has a secondary mode when it is used with the "modify" 
+function: It can be used to do inline text substitution.
 
-Note that "x" is a lower level function, so it can be used within a grammar
-just like "get" or "a" or "g" and so on.
+The example below will look for "Alice" and replace it with "Bob".
 
-The following example looks for 'hello', name, '!' and exchanges name with 
-an all upper case version of name.
+	my $text = "Hello Alice, how are you?";
+	$grammar=swap("Alice", sub{return "Bob"});
+	ok($grammar->($text), "match found");
+	ok($text eq "Hello Bob, how are you?", "substitution occurred");
+
+The above example could be done with less typing by using the "swap" function.
+The "swap" function is nothing more than the "modify" and "get" function 
+wrapped up for you to look more like perls regular expression syntax and 
+to reduce some of the typing you need to do.
+
+However, using "get" to do inline text replacement has it's advantage
+for more complicated grammars or patterns. Sometimes when you do a substitution,
+you need to make sure you have the correct text by looking for certain text
+before and after the pattern. But when you use this in a s/// regular expression,
+you have to capture the before and after text and put it into the replacement
+text as $1 and $2. 
+
+This is how you might look for two numbers separated by a plus character "+" 
+and replace it with a minus "-" character, using regular expressions:
+
+	my $text = "A+, 123+456, count++";
+	ok($text=~s{(\d+)\+(\d+)}{$1-$2}, "match found");
+	ok($text eq 'A+, 123-456, count++', "replacement took place");
+
+With Parse::Gnaw, you don't have to capture $1 and $2 and use it in the
+replacement string. Instead, you can use the "modify" function, define
+the pattern, and then use "get" to replace just the part you want,
+without using $1 and $2, and without capturing text before and after.
 
 	
-
+	my $text = "A+, 123+456, count++";
+	ok(modify(some(dgt),get(sub{return'-'},'+'),some(dgt))->($text), "match found");
+	ok($text eq 'A+, 123-456, count++', "replacement took place");
 
 =head2 now versus defer
 
@@ -1054,28 +1159,28 @@ Note that this is better than a grammar that supports "rules", because
 extensibility means you can pass other grammar components into your subroutine
 and manipulate them however you want before generating the final parsing logic.
 
-=head2 ccdigit, ccword, ccspace
+=head2 dgt, wrd, spc
 
 An simple example of extensibility is how the character class shortcuts 
 for digits and so on are extensions of the basic underlying "cc" and 
 "CC" functions, rather than being their own grammar component. Here is 
 how these shortcuts could be declared:
 
-	sub ccdigit { cc('0-9') }
-	sub CCDIGIT { CC('0-9') }
+	sub dgt { cc('0-9') }
+	sub DGT { CC('0-9') }
 
-	sub ccword { cc('a-zA-Z0-9_') }
-	sub CCWORD { CC('a-zA-Z0-9_') }
+	sub wrd { cc('a-zA-Z0-9_') }
+	sub WRD { CC('a-zA-Z0-9_') }
 
-	sub ccspace { cc("\n \t \r \f") }
-	sub CCSPACE { CC("\n \t \r \f") }
+	sub spc { cc("\n \t \r \f") }
+	sub SPC { CC("\n \t \r \f") }
 
 If you wanted to create even shorter versions of the above shortcuts, you 
 could declare them as subroutines in your own code and then call them
 in your grammar. For example, if you want to use the letter 'd' every time
 you want a digit character class, you could declare the following in your code:
 
-	sub d { ccdigit }
+	sub d { dgt }
 
 =head2 qa
 
@@ -1189,7 +1294,7 @@ easily use that functionality at several different points in the grammar.
 	
 	sub kirk_dipolomacy1 {ql('We come in peace .')}
 	sub kirk_dipolomacy2 {ql('Shoot to kill .')}
-	sub kirk_to_scotty {ql('I need warp speed now, Scotty !')}
+	sub kirk_to_scotty {ql('I need warp speed now , Scotty !')}
 	sub kirk_to_spock {ql('What is it , Spock ?')}
 	sub kirk_to_bones {ql('Just fix him , Bones')}
 	sub kirk_solution {ql('Activate ship self-destruct mechanism .')}
@@ -1293,8 +1398,98 @@ so we can use that string in the formatted output.
 		attributeline('McCoy', a(mccoy_job, mccoy_diag, mccoy_rant1)) 
 	}
 
-	
+
+=head1 HOOKS FOR STREAMS
+
+By default, the Parse::Gnaw module works similar to perl regular expressions.
+It works on the text in memory and loads the entire text when the top level
+function callback is called and passed a string to parse.
+
+However, the Parse::Gnaw module was designed from the ground up to work with 
+partial texts, to work with a subset of an entire piece of text, and pull 
+into memory only what it needed, and flush out of memory any text that it 
+was finished parsing.
+
+Theoretically, Parse::Gnaw should be able to parse an infinite amount of text
+as long as the grammar defines rules that only need a finite chunk that will 
+fit in memory to find a match.
+
+To support this feature, Parse::Gnaw has some hooks that allow you to modify
+its default behaviour so that it only needs to operate on a subset of the
+entire text at a time.
+
+These functions, including the "commit" function, are defined in this section. 
+
+=head2 commit
+
+The "commit" function is a lower level grammar component function that you 
+put into your grammar to define points in the grammar where the parser can
+commit to the current interpretation because no other interpretation is
+possible.
+
+Normally, the parser will not commit to an interpretation until it has 
+reached the very last component in the grammar. The "commit" function allows
+you to force the parser to commit to the current interpretation.
+
+This helps parse streams because the "commit" function means that the parser
+will commit any text parsed so far, call any callbacks on that text, and then
+flush the text from memory.
+
+=head2 flush
+
+After the "commit" function calls any callbacks on the text parsed so far,
+the parser calls the "flush" function.
+
+	our $__gnaw__flush = undef;
+
+By default, it is undef, which means any committed text is ignored and
+simply deleted from memory after the "commit" function is called.
+This might be the functionality you want if you are doing a read-only
+parse of a block of text.
+
+However, if you are parsing a file, modifying, and want to save the modifications,
+then you can define $__gnaw__flush to point to a subroutine reference which 
+will write the results to a harddrive or some external device.
+
+If you want a basic append-to-file function, you can call the followng function
+and pass it the filename:
+
+	__gnaw__flushed_text_is_appended_to_file( 'filename' );
+
+The function will return the filehandle of the file being appended to.
+You can ignore it if you want or you can use the filehandle to force
+the file be closed in the middle of your script execution so you can 
+open another file.
+
+=head2 sip
+
+At the input side, we need a mechanism for reading a little bit of text 
+from some external source as we need it. This is handled by the "sip" function.
+
+	our $__gnaw__sip = sub{};
+
+Whenever the Parse::Gnaw code hits the end of the text in memory, it will 
+call the code reference in $__gnaw__sip. If this callback wants to add
+text to the linked list in memory, it can get the text it wants to add
+and call the __gnaw__insert_string_at_end_of_linked_list() function, 
+passing the new text to that subroutine.
+
+The amount of text you add to the end of the linked list is up to you.
+If the parser hits the end of text in memory, it will simply call the
+$__gnaw__sip function again.
+
+When your $__gnaw__sip function has reached the end of its input source
+file(s), you will want your subroutine to handle further calls to it by
+doing nothing and returning immediately.
+
+By default, the $__gnaw__sip subref is set to a subroutine reference that
+doesn't do anything. This is because the default behaviour of Parse::Gnaw
+is to process the entire text being parsed in memory.
+
+
+
 =head1 NOT IMPLEMENTED YET
+
 
 =head2 position markers
 

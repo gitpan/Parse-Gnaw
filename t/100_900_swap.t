@@ -10,5 +10,5 @@ my $grammar;
 
 
 my $input = "please call 555-1212 for more details";
-ok(swap(some(ccdigit),'-',some(ccdigit), sub{return "***".shift(@_)."***";}) -> ($input)==1, "checking match was found");
+ok(swap(some(dgt),'-',some(dgt), sub{return "***".shift(@_)."***";}) -> ($input)==1, "checking match was found");
 ok($input eq 'please call ***555-1212*** for more details', "checking substitution/swap took place");

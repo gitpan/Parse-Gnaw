@@ -59,4 +59,10 @@ that uses modify and get to implement its functionality.
 Added some more tests and updated the POD.
 
 
+0.29	2008-11-29
 
+add the "flush" and "sip" functions to get/put text from/to
+a file or stream or whatever. Keep cleaning up POD.
+
+Need to implement remaining functionality in the 
+"not implemented" list.

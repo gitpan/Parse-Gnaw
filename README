@@ -1,5 +1,8 @@
 Parse-Gnaw
 
+Parse::Gnaw - An extensible parser. Define grammars using subroutine calls.
+Define your own grammar extensions by defining new subroutines. Parse text
+in memory or from/to files or other streams.
 
 Gnaw is a perl module which implements full regular expressions and 
 full text parsing grammars using nothing but pure perl code limited 
