@@ -30,6 +30,7 @@ lib/Parse/Gnaw/Decomment.pm
 ./t/100_660_multi_c.t
 ./t/100_670_c_with_alternate.t
 ./t/100_700_modify.t
+./t/100_800_word_boundary.t
 ./t/100_900_swap.t
 ./t/100_910_swap.t
 ./t/100_920_swap.t

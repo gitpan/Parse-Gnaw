@@ -1255,6 +1255,48 @@ phase, before the parser is built, and based on the parameters passed in,
 it decides what sort of grammar to build for a separated list.
 
 
+=head2 bb
+
+=head2 BB
+
+The 'bb' and 'BB' functions are positional assertions. The 'bb' marker 
+is true if the the text being parsed contains a word boundary at that location.
+The 'BB' function is true if the text being parsed does NOT contain a
+word boundary at that location.
+
+A word boundary can occur under four different situations:
+
+	1) at a transition from a 'wrd' character to a 'WRD' character
+	2) at a transition from a 'WRD' character to a 'wrd' character
+	3) at the beginning of the string
+	4) at the end of the string
+
+The following grammar will only match text if it contains the literal 'alice'
+that contains word boundaries before and after the literal. i.e. something
+must separate 'alice' from the rest of the text.
+
+	$grammar = match(bb, 'alice', bb);
+
+	# beginning of string is a word boundary
+	ok($grammar->('alice bob charlie')==1, "match found"); 
+
+	# spaces are word boundaries
+	ok($grammar->('bob alice charlie')==1, "match found");
+
+	# end of string is a word boundary
+	ok($grammar->('bob charlie alice')==1, "match found");
+
+	# the '(' and ')' symbols are word boundaries
+	ok($grammar->('bob alice(42) charlie')==1, "match found");
+	ok($grammar->('bob (71)alice charlie')==1, "match found");
+
+	# 'bob' and 'charlie' are too close to 'alice', therefore 
+	# 'alice' is not separated before and after with word boundaries.
+	ok($grammar->('bob bobalice charlie')==0, "match not found");
+	ok($grammar->('bob alicecharlie charlie')==0, "match not found");
+	ok($grammar->('bob bobalicecharlie charlie')==0, "match not found");
+
+
 
 =head1 FULL GRAMMAR EXAMPLES
 
@@ -1490,8 +1532,7 @@ is to process the entire text being parsed in memory.
 
 =head1 NOT IMPLEMENTED YET
 
-
-=head2 position markers
+=head2 end of input text
 
 start of text (the perl regexp equivalent of \A) isn't needed in Parse::Gnaw.
 Instead, call the "parse" function, which only will look at the start of the text.
@@ -1501,16 +1542,6 @@ define an entire text. Otherwise, "parse" or "match" will match as far as they c
 then stop. If there is any text left, they still pass. If you want them to match
 the entire string, then end your grammar with the "eot" function.
 
-The word boundary position marker is also needed. It will match on four different
-situations:
-
-	1) at a transition from a \w character to a \W character
-
-	2) at a transition from a \W character to a \w character
-
-	3) at the beginning of the string
-
-	4) at the end of the string
 
 
 =head2 skip, noskip
@@ -1621,6 +1652,11 @@ value in index 0 of an element:
 		successful completion of parsing or a commit.
 		Payload contains code ref to callback.
 	4: element is a head/tail endpoint
+		These two elements are never to be deleted.
+	5: word boundary markers inserted by "sip".
+		These might indicate transition from one file to another.
+		Note that normally moving text pointer forward by one
+		will delete all old markers, but it won't delete these markers.
 
 The linked list starts and ends with two signpost elements:
 'head' and 'tail'. No text is ever stored in these signpost

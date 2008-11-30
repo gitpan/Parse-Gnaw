@@ -66,3 +66,11 @@ a file or stream or whatever. Keep cleaning up POD.
 
 Need to implement remaining functionality in the 
 "not implemented" list.
+
+0.30	2008-11-29 plus
+
+add the "bb" and "BB" instructions to detect word boundaries.
+
+added test to verify 'bb' instruction. passes.
+
+

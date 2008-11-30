@@ -5,7 +5,7 @@
 1; 
 { 
 	package Parse::Gnaw; 
-	our $VERSION = '0.29'; 
+	our $VERSION = '0.30'; 
 
 	use Exporter;
 	@ISA = qw( Exporter );
@@ -127,6 +127,7 @@ sub __GNAW__LETTER_WHAT { 1; } # element holds a text letter
 sub __GNAW__MARKER_WHAT { 2; } # element is a marker
 sub __GNAW__CLLBCK_WHAT { 3; } # element holds a callback
 sub __GNAW__HEADER_WHAT { 4; } # element is a head/tail point
+sub __GNAW__WRDBND_WHAT { 5; } # element is a word boundary marker inserted by "sip" function
 
 
 
@@ -393,18 +394,6 @@ sub __gnaw__text_element_is_valid { # (textelement)
 
 	return;
 }
-
-sub __gnaw__restore_old_text_marker {
-	my ($textmarker) = @_;
-
-	__gnaw__text_element_is_valid($textmarker);
-	$__gnaw__curr_text_element = $textmarker;
-
-	return;
-}
-
-
-
 
 sub __gnaw__call_all_callbacks_from_beginning_to_current_element { # including current element if it is a callback
 	########GNAWMONITOR("__gnaw__call_all_callbacks_from_beginning_to_current_element BEGIN");
@@ -768,7 +757,12 @@ sub __gnaw__move_pointer_forward { # move forward to first text element. delete 
 		    ($__gnaw__curr_text_element ne $__gnaw__tail_text_element) 
 		and ($__gnaw__curr_text_element->[__GNAW__WHAT] != __GNAW__LETTER_WHAT)
 	) {
-		$__gnaw__curr_text_element = __gnaw__delete_this_text_element($__gnaw__curr_text_element);
+		# don't delete word boundary markers inserted by "sip" function.
+		if($__gnaw__curr_text_element->[__GNAW__WHAT] == __GNAW__WRDBND_WHAT) {
+			$__gnaw__curr_text_element = $__gnaw__curr_text_element->[__GNAW__NEXT];
+		} else {
+			$__gnaw__curr_text_element = __gnaw__delete_this_text_element($__gnaw__curr_text_element);
+		}
 	}
 	return;
 }	
@@ -884,6 +878,8 @@ sub __gnaw__string_describing_single_text_element { # pass in text element, retu
 		$final_string.= "CALLBACK ";
 	} elsif ($curr->[__GNAW__WHAT] == __GNAW__HEADER_WHAT) {
 		$final_string.= "header   ";
+	} elsif ($curr->[__GNAW__WHAT] == __GNAW__WRDBND_WHAT) {
+		$final_string.= "BOUNDARY ";
 	} else {
 		$final_string .= "unknown id number(".($curr->[__GNAW__WHAT]);
 	}
@@ -1048,13 +1044,25 @@ sub __gnaw__parse_failed {
 
 	my ($instruction, $textmarker) = __gnaw__pop_fallback_postition();
 	__gnaw__move_current_instruction_pointer($instruction);
-	__gnaw__restore_old_text_marker($textmarker);
+
+	# make sure old text marker is still valid
+	__gnaw__text_element_is_valid($textmarker);
+
+	# set current pointer to text marker.
+	$__gnaw__curr_text_element = $textmarker;
+
 
 	# delete the current text marker and all the markers in front of it until we hit text
 	while(	($__gnaw__curr_text_element ne $__gnaw__tail_text_element) and
 		($__gnaw__curr_text_element->[__GNAW__WHAT] != __GNAW__LETTER_WHAT)
 	) {
-		__gnaw__delete_this_text_element($__gnaw__curr_text_element);
+		# dont delete word boundary markers inserted by "sip".
+		if($__gnaw__curr_text_element->[__GNAW__WHAT] == __GNAW__WRDBND_WHAT) {
+			$__gnaw__curr_text_element = $__gnaw__curr_text_element->[__GNAW__NEXT];
+		} else {
+			__gnaw__delete_this_text_element($__gnaw__curr_text_element);
+		}
+		
 	}
 
 
@@ -1302,7 +1310,7 @@ sub cc {
 
 	my $compiled_code = {
 		opcode => 'character class',
-		coderef=> \&__gnaw__cc,
+		coderef=> \&__gnaw__cc_callback,
 		value => $char_set_hash_ref,
 		debugstring => $characterset,
 	};
@@ -1313,7 +1321,7 @@ sub cc {
 }
 
 
-sub __gnaw__cc {
+sub __gnaw__cc_callback {
 	########GNAWMONITOR( "__gnaw__cc command");
 	my $thisinstruction = __gnaw__get_current_instruction_pointer();
 	my $nextinstruction = __gnaw__given_instruction_return_next_instruction($thisinstruction);
@@ -2435,7 +2443,7 @@ sub __gnaw__get {
 			};
 
 			__gnaw__create_new_element_before_this_element( $beginmarkercopy1, __GNAW__CLLBCK_WHAT, $call_back_in_front_of_marker
-				######## m " 'get' function created callback a callback to put at front of string "
+				######## , " 'get' function created callback a callback to put at front of string "
 			);
 
 		};
@@ -2493,6 +2501,141 @@ sub c {
 
 
 	return get(\&__gnaw__c_callback, @_);
+
+}
+
+
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# bb
+# positional marker: word boundary
+# this is "true" on any of the following conditions, otherwise false:
+#	1) at a transition from a \w character to a \W character
+#	2) at a transition from a \W character to a \w character
+#	3) at the beginning of the string
+#	4) at the end of the string
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+sub bb {
+
+	my $compiled_code = {
+		opcode => 'word_boundary',
+		coderef=> \&__gnaw__bb_callback,
+	};
+
+	my $stitcher = generate_stitcher($compiled_code, $compiled_code);
+
+	return $stitcher;
+}
+
+sub BB {
+
+	my $compiled_code = {
+		opcode => 'NOT word_boundary',
+		coderef=> \&__gnaw__not_bb_callback,
+	};
+
+	my $stitcher = generate_stitcher($compiled_code, $compiled_code);
+
+	return $stitcher;
+}
+
+
+sub __gnaw__bb_callback {
+	########GNAWMONITOR( "__gnaw__wb_callback");
+	my $thisinstruction = __gnaw__get_current_instruction_pointer();
+	my $nextinstruction = __gnaw__given_instruction_return_next_instruction($thisinstruction);
+	__gnaw__move_current_instruction_pointer($nextinstruction);
+
+	if(__gnaw__are_we_currently_at_a_word_boundary() == 1) {
+		return;
+	} else {
+		__gnaw__parse_failed();
+	}
+}
+
+sub __gnaw__not_bb_callback {
+	########GNAWMONITOR( "__gnaw__not_wb_callback");
+	my $thisinstruction = __gnaw__get_current_instruction_pointer();
+	my $nextinstruction = __gnaw__given_instruction_return_next_instruction($thisinstruction);
+	__gnaw__move_current_instruction_pointer($nextinstruction);
+
+	if(__gnaw__are_we_currently_at_a_word_boundary() == 0) {
+		return;
+	} else {
+		__gnaw__parse_failed();
+	}
+}
+
+
+my %__gnaw__wb_word_class_hash;
+
+foreach my $letter ('a'..'z', 'A'..'Z', '0'..'9', '_') {
+	$__gnaw__wb_word_class_hash{$letter}=1;
+}
+
+# print Dumper \%__gnaw__wb_word_class_hash;
+
+sub __gnaw__are_we_currently_at_a_word_boundary {
+	########GNAWMONITOR( "__gnaw__are_we_currently_at_a_word_boundary begin");
+	
+	# if we're at the end of input text, then we're at a word boundary, nothing further needed.
+	if(__gnaw__at_end_of_input_text()) {
+		########GNAWMONITOR("at end of input text");
+		return 1;
+	}
+
+	# starting from current position, move forward until we hit a letter or a word boundary marker.
+	# do not go past the tail marker.
+
+	my $markerforward = $__gnaw__curr_text_element;
+	while(	
+		    ($markerforward ne $__gnaw__tail_text_element) 
+		and ($markerforward->[__GNAW__WHAT] != __GNAW__LETTER_WHAT)
+		and ($markerforward->[__GNAW__WHAT] != __GNAW__WRDBND_WHAT)
+	) {
+		$markerforward = $markerforward->[__GNAW__NEXT];
+	}
+
+	# starting from just before current position,
+	# move back until we hit a letter or word boundary marker,
+	# do not go past the head marker.
+	my $markerbackward = $__gnaw__curr_text_element->[__GNAW__PREV];
+	while(
+		    ($markerbackward ne $__gnaw__head_text_element) 
+		and ($markerbackward->[__GNAW__WHAT] != __GNAW__LETTER_WHAT)
+		and ($markerbackward->[__GNAW__WHAT] != __GNAW__WRDBND_WHAT)
+	) {
+		$markerbackward = $markerbackward->[__GNAW__PREV];
+	}
+
+	# return 1 if we know we are on a boundary. 
+	return 1 if($markerforward eq $__gnaw__tail_text_element);
+	return 1 if($markerbackward eq $__gnaw__head_text_element);
+	return 1 if($markerforward->[__GNAW__WHAT] == __GNAW__WRDBND_WHAT);
+	return 1 if($markerbackward->[__GNAW__WHAT] == __GNAW__WRDBND_WHAT);
+
+	if(	($markerforward->[__GNAW__WHAT] == __GNAW__LETTER_WHAT)
+	and	($markerbackward->[__GNAW__WHAT] == __GNAW__LETTER_WHAT)
+	) {
+		my $letterforward  = $markerforward->[__GNAW__PAYLOAD];
+		my $letterbackward = $markerbackward->[__GNAW__PAYLOAD];
+
+		my $letterforwardiswordclass = exists($__gnaw__wb_word_class_hash{$letterforward})?1:0;
+		my $letterbackwardiswordclass = exists($__gnaw__wb_word_class_hash{$letterbackward})?1:0;
+
+		#print "previous=$letterbackwardiswordclass,  next=$letterforwardiswordclass\n\n";
+
+		if(	(    $letterforwardiswordclass  and not($letterbackwardiswordclass))
+		or	(not($letterforwardiswordclass) and     $letterbackwardiswordclass )
+		) {
+			return 1;
+		} else {
+			return 0;
+		}
+
+	} else {
+		__gnaw__die("__gnaw__are_we_currently_at_a_word_boundary should have eliminated everything but two letter positions.");
+	}
 
 }
 
