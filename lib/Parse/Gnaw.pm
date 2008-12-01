@@ -5,7 +5,7 @@
 1; 
 { 
 	package Parse::Gnaw; 
-	our $VERSION = '0.30'; 
+	our $VERSION = '0.31'; 
 
 	use Exporter;
 	@ISA = qw( Exporter );
@@ -36,9 +36,6 @@ use Data::Dumper;
 
 #use Parse::Gnaw::Decomment;
 
-### die "you just uncommented this die statement";
-
-# these two subroutines are used to turn on/off debugging info
 sub GNAWMONITOR_0 {}  
 
 sub GNAWMONITOR  {
@@ -2640,6 +2637,58 @@ sub __gnaw__are_we_currently_at_a_word_boundary {
 }
 
 
+
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# end
+# positional marker: end of input text
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+sub end {
+
+	my $compiled_code = {
+		opcode => 'endoftext',
+		coderef=> \&__gnaw__endoftext_callback,
+	};
+
+	my $stitcher = generate_stitcher($compiled_code, $compiled_code);
+
+	return $stitcher;
+}
+
+
+sub __gnaw__endoftext_callback {
+	########GNAWMONITOR( "__gnaw__endoftext_callback");
+	my $thisinstruction = __gnaw__get_current_instruction_pointer();
+	my $nextinstruction = __gnaw__given_instruction_return_next_instruction($thisinstruction);
+	__gnaw__move_current_instruction_pointer($nextinstruction);
+
+	$__gnaw__skip_code->();
+
+	# if we're at the end of input text, nothing further needed.
+	if(__gnaw__at_end_of_input_text()) {
+		########GNAWMONITOR("at end of input text");
+		return;
+	}
+
+	# starting from current position, move forward until we hit a letter.
+	# do not go past the tail marker.
+
+	my $markerforward = $__gnaw__curr_text_element;
+	while(	
+		    ($markerforward ne $__gnaw__tail_text_element) 
+		and ($markerforward->[__GNAW__WHAT] != __GNAW__LETTER_WHAT)
+	) {
+		$markerforward = $markerforward->[__GNAW__NEXT];
+	}
+
+	if($markerforward eq $__gnaw__tail_text_element) {
+		return;
+	}
+
+	__gnaw__parse_failed();
+}
+
+
 #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 # more advanced grammar extensions
 #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -2684,6 +2733,13 @@ sub slist {
 	}
 
 }
+
+
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# az is like =~ m{\A blah \Z}
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+sub az { parse( @_, end ) }
 
 
 #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++

@@ -69,12 +69,12 @@ sub scotty_isms { a(scotty_phy101, scotty_estimate) }
 sub alien_isms {'weeboo'}
 
 
-
 sub trek_isms {a(mccoy_isms, spock_isms, kirk_isms, scotty_isms, alien_isms )}
 
-sub trek_script {g([23,23],trek_isms)}
-
-$grammar = parse(  trek_script );
+# we want to start at the very beginning of the input text, 
+# we expect 1 or more trekisms, 
+# and we expect to read to the end of the input text.
+$grammar = parse( some(trek_isms), end );
 
 
 

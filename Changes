@@ -73,4 +73,10 @@ add the "bb" and "BB" instructions to detect word boundaries.
 
 added test to verify 'bb' instruction. passes.
 
+0.31	2008-11-30
 
+add the "end" function (end of text position assertion). 
+add the "az" function (equivalent to =~ m/\A ... \Z/)
+add large chunks of text to the "extensions" section in POD.
+Hopefully extensions are explained sufficiently that folks
+can create their own without too many questions.

@@ -332,6 +332,13 @@ the text. It does not move forward through the string to find a match.
 If you're defining a grammar to parse a file or some formal language, 
 you probably want to use "parse" instead of "match".
 
+=head2 az 
+
+The "az" function requires the text being parsed match the pattern 
+from beginning to end. 
+
+	az( blah )   ==>  =~ m/\A blah \Z/
+
 =head1 LOW LEVEL FUNCTIONS
 
 =head2 Literals
@@ -620,6 +627,8 @@ The following will look for one of any possible fruit in your text.
 	$grammar=match(a('apple', 'banana', 'pear', 'peach'));
 
 	ok($grammar->("she is the apple of my eye")==1, "found apple");
+
+=head2 qa (quoted alternation)
 
 Because listing a bunch of alternate literals is fairly common,
 the "qa" function allows you to do that with fewer quotation marks.
@@ -1143,6 +1152,77 @@ previous text from memory.
 
 	$grammar = match(some('keyword', commit, 'blah', 'blah', 'blah'));
 
+=head2 positional markers
+
+=head2 bb
+
+=head2 BB
+
+The 'bb' and 'BB' functions are positional assertions. The 'bb' marker 
+is true if the the text being parsed contains a word boundary at that location.
+The 'BB' function is true if the text being parsed does NOT contain a
+word boundary at that location.
+
+A word boundary can occur under four different situations:
+
+	1) at a transition from a 'wrd' character to a 'WRD' character
+	2) at a transition from a 'WRD' character to a 'wrd' character
+	3) at the beginning of the string
+	4) at the end of the string
+
+The following grammar will only match text if it contains the literal 'alice'
+that contains word boundaries before and after the literal. i.e. something
+must separate 'alice' from the rest of the text.
+
+	$grammar = match(bb, 'alice', bb);
+
+	# beginning of string is a word boundary
+	ok($grammar->('alice bob charlie')==1, "match found"); 
+
+	# spaces are word boundaries
+	ok($grammar->('bob alice charlie')==1, "match found");
+
+	# end of string is a word boundary
+	ok($grammar->('bob charlie alice')==1, "match found");
+
+	# the '(' and ')' symbols are word boundaries
+	ok($grammar->('bob alice(42) charlie')==1, "match found");
+	ok($grammar->('bob (71)alice charlie')==1, "match found");
+
+	# 'bob' and 'charlie' are too close to 'alice', therefore 
+	# 'alice' is not separated before and after with word boundaries.
+	ok($grammar->('bob bobalice charlie')==0, "match not found");
+	ok($grammar->('bob alicecharlie charlie')==0, "match not found");
+	ok($grammar->('bob bobalicecharlie charlie')==0, "match not found");
+
+=head2 end function
+
+The "end" function is a positional assertion that matches only if the parser 
+has reached the end of the input text. Before testing for the end of input,
+the "end" function will execute the "skip" function, if any is currently active,
+so that it may skip over any content you deem ignorable. It then checks to see
+if it has reached the end of the input text. If it has, then it matches.
+
+If it doesn't, then it fails.
+
+Any grammar components after the "end" function will produce undefined behaviour,
+since nothing can be parsed after the end of the input text.
+
+If you want to see if some text, from beginning to end, matches your pattern,
+then use the "parse" function, and make the last grammar component the "end" 
+function. For example, this grammar will only match if the input text from
+beginning to end consists of one or more widgets (where "widgets" is defined
+by another subroutine of that name.):
+
+	$grammar = parse( some( widgets ), end );
+
+If you use the "match" function, it will start at the beginning but will skip
+ahead until it finds a match. If you omit the "end" function, any text that
+does not match will be ignored and the parsing will stop at the last matching
+widget. To confirm that the whole text is nothing but one or more widgets,
+use the above syntax.
+
+
 =head1 EXTENSIBLE
 
 Since the grammar components are built up as subroutines, it is possible
@@ -1254,49 +1334,216 @@ parser "rules". The "slist" subroutine is called during the "generation"
 phase, before the parser is built, and based on the parameters passed in,
 it decides what sort of grammar to build for a separated list.
 
+=head2 az function
 
-=head2 bb
+The "az" function is a simple extension
 
-=head2 BB
+	sub az { parse( @_, end ) }
 
-The 'bb' and 'BB' functions are positional assertions. The 'bb' marker 
-is true if the the text being parsed contains a word boundary at that location.
-The 'BB' function is true if the text being parsed does NOT contain a
-word boundary at that location.
-
-A word boundary can occur under four different situations:
-
-	1) at a transition from a 'wrd' character to a 'WRD' character
-	2) at a transition from a 'WRD' character to a 'wrd' character
-	3) at the beginning of the string
-	4) at the end of the string
-
-The following grammar will only match text if it contains the literal 'alice'
-that contains word boundaries before and after the literal. i.e. something
-must separate 'alice' from the rest of the text.
-
-	$grammar = match(bb, 'alice', bb);
-
-	# beginning of string is a word boundary
-	ok($grammar->('alice bob charlie')==1, "match found"); 
-
-	# spaces are word boundaries
-	ok($grammar->('bob alice charlie')==1, "match found");
-
-	# end of string is a word boundary
-	ok($grammar->('bob charlie alice')==1, "match found");
-
-	# the '(' and ')' symbols are word boundaries
-	ok($grammar->('bob alice(42) charlie')==1, "match found");
-	ok($grammar->('bob (71)alice charlie')==1, "match found");
-
-	# 'bob' and 'charlie' are too close to 'alice', therefore 
-	# 'alice' is not separated before and after with word boundaries.
-	ok($grammar->('bob bobalice charlie')==0, "match not found");
-	ok($grammar->('bob alicecharlie charlie')==0, "match not found");
-	ok($grammar->('bob bobalicecharlie charlie')==0, "match not found");
+It requires that the string being parsed matches from beginning to end the 
+pattern passed in.
 
 
+=head2 Making Your Own Extensions
+
+The process to making your own grammar extensions can be broken down into 
+a few steps:
+
+	1: deal with any pre-processed arguments passed in
+	2: deal with any remaining grammar arguments passed in
+	3: return a "stitcher"
+
+head3 preprocessed arguments
+
+preprocessed arguments are arguments passed into your extension subroutine
+that do not translate directly into grammar components but instead are used
+by your subroutine in some way to decide what sort of component to generate.
+
+The "qa" (quoted alternation) function takes one preprocessed argument,
+a single string with space separated literals. It then breaks that string
+up into an array of literals that can then be passed into an existing
+grammar component function, the "a" function.
+
+If your extension has some preprocessed arguments, this is the first thing
+you want to deal with. Does your extension always receive a fixed number
+of preprocessed arguments? Do they always appear at the same position in
+the list of arguments (always first or always last or similar)? If so, then
+you might start by removing these preprocessed arguments from the @_ list.
+And potentially error checking them in some way, such as calling perls "ref"
+function on them to make sure they're not a "stitcher" or some other thingy.
+
+If you have a variable number of preprocessed arguments, or if they appear
+in different positions within the @_ parameter list, then you'll need
+some way of determining how many and where. Usually, the number of regular
+grammar components passed into any function is variable, so any pre-processed
+arguments are usually fixed to make them easier. However you could devise 
+alternative ways to distinguish your preprocessed arguments from the normal
+grammar component arguments. Since extensions are just perl subroutines,
+the method is up to you.
+
+Once the preprocessed arguments are removed from @_, process them however
+your extension needs to deal with them. Usually this entails passing them
+into some grammar component or another to generate a stitcher.
+
+In the "slist" function, we have two "preprocessed" arguments which are
+the "item" and the "separator". Because we want to allow the item and 
+separator to be any number of grammar components, we force the number
+of paramters allowed to exactly two, and then require the user to 
+group multiple components into array references. 
+
+The "slist" function then passes the "item" and "separator" pieces
+directly into other existing components.
+
+head3 remaining grammar arguments
+
+If your extension passes in normal grammar components, such as literal
+strings, or arrays of literal strings, or functions such as "a" or "bb" 
+or whatever, then if possible, pass these items directly into whatever
+existing grammar function provides the behaviour pattern you want.
+
+If you want the arguments to be processed in a series, then pass them
+into the "series" function, which will process them as if they were 
+normal parts of some grammar and return a "stitcher" function.
+
+Since you removed any preprocessed arguments from the @_ array, your 
+extension should be able to pass the remaining @_ array into whatever
+lower level functional components you want.
+
+For example, the "some" function is a shortcut to the "g" (greedy)
+function, forcing the quantity to be "1 or more". You can pass any
+number of grammar components into the "some" function. The "some"
+function simply passes them all directly into the "g" function.
+
+	sub some { g([1], @_) }
+
+The "az" function is an extension that wraps the "parse" function,
+assumes everything passed in is a grammar component and adds the
+"end" function to the end of the pattern.
+
+	sub az { parse( @_, end ) }
+
+=head3 return a stitcher
+
+Most extensions operate as low level grammar components and need to 
+return a "stitcher" so that the return value of the extension can
+be used inside a larger grammar. You can use the "some" extension
+inside a larger grammar and not even know it is an extension because
+it returns a stitcher just like any other low level component.
+
+In the case of the "some" function, the stitcher is created by the 
+"g" function, and since it is the last expression of the "some" 
+subroutine, the return value of the "g" function is the return 
+value of the "some" function. Therefore the "some" extension 
+returns a stitcher without any explicit return call.
+
+	sub some { g([1], @_) }
+
+The "slist" extension generates one of two possible subgrammars
+and returns the stitcher for that component. It was coded with
+an explicit return just so that there is only one return in the
+subroutine.
+
+	sub slist {
+		my($item,$separator,$trailingseparatorallowed) = @_;
+		my $extension;
+
+		if($trailingsepatorallowed){
+			# an item, 
+			# followed by any number of (separator item) 
+			# and maybe one separator at end
+			$extension = series( $item,  any($separator, $item), maybe($separator) );
+		} else {
+			# an item, followed by any number of ( separator item ) 		
+			$extension = series( $item, any($separator, $item) );
+		}
+
+		return $extension;
+	}
+
+The "slist" function uses the "series" function to generate a stitcher, and 
+then the "slist" function returns that stitcher. The series function is explained
+in more detail below.
+
+You don't have to return a stitcher if your extension is intended to 
+operate as a top level function. The "az" function is an extension that
+operates as a top level function wrapping the "parse" function. Just remember
+that top level functions return coderefs that act as the parser when
+you dereference them. Top level functions cannot be part of a larger grammar.
+
+If you don't return a stitcher, about the only other thing you can return
+is a top level code reference.
+
+=head3 series function
+
+The "series" function is a low level function in Parse::Gnaw that takes any
+number of grammar components, literals, array references of grammar components,
+and so on, and creates a single subgrammar that expects all those components
+to occur in one long series.
+
+You don't have to use the "series" function in your normal grammars because 
+all the other functions use it for you. For example the "match" function takes
+any number of input parameters and passes them into the "series" function,
+it then uses that stitcher to create the "match" function.
+
+If you're creating a grammar extension, however, you might want to explicitely
+call the "series" function to put several grammar components together into
+a sequence and generate a single stitcher.
+
+The "slist" extension is an example of an extension that uses the "series"
+function to generate the stitcher.
+
+head3 trekism extension explained
+
+The trekisms grammar, shown elsewhere in this document, contains an
+interesting grammar extension. It doesn't really look like a grammar 
+extension so much as it looks like a nice way to bundle some funcitonality
+that gets reused throughout the grammar.
+
+The grammar identifies a number of bits of dialogue and assumes certain
+characters say those lines of dialogue. The grammar then prints out the
+name of the character along with the line they said. 
+
+Since this function is done in the grammar at multiple locations, but 
+for different character names, normal grammars would have to execute
+this functionality as some sort of "action" or defered callback or somehting
+and then figure out a way to capture the line of dialoge as well as
+figure out a way to pass in different character names for each instance.
+
+In the case of Parse::Gnaw, we simply make an extension.  Here is the
+entire code for the extension subroutine:
+
+	sub attributeline { 
+		my $character_name=shift(@_);
+		my @lines_of_dialogue_for_this_character = @_;
+		my $callback = sub{$captured.=sprintf ("%8s says: %s\n", $character_name,shift(@_));};
+		my $stitcher = get($callback, a(@lines_of_dialogue_for_this_character));
+		return $stitcher;
+	}
+
+The "attributeline" extension takes one preprocessed argument, a string 
+that is the name of the character for this instance.
+The remaining arguments are each treated as unique lines of dialogue
+that the character might say.
+
+It takes the character name and creates a callback for a "get" function.
+The callback takes the name, the line of dialogue handed to it by "get",
+creates a pretty-formatted string, and then appends it to the end of a
+"captured" variable.
+
+The extension then creates a stitcher that is nothing more than
+the "get" function, the callback, and the lines of dialogue 
+handed into the "a" function, treating each line as a valid
+altenate for that character.
+
+By passing the @lines of dialogue into "a", we get alternates
+that we can pass into "get". By passing it into the "get" 
+function, our callback has the line of dialogue available to put
+into a formatted version. By passing the "name" variable into 
+the callback, the callback becomes a closure and remembers the
+"name" variable so it can be sent out when the callback is
+called by the "get" function.
+
+See the "trekisms" grammar in the examples below:
 
 =head1 FULL GRAMMAR EXAMPLES
 
@@ -1312,9 +1559,10 @@ easily use that functionality at several different points in the grammar.
 	my $captured="";
 
 	sub attributeline { 
-		my ($name, $restofgrammar) = @_;
-		my $callback = sub{$captured.=sprintf ("%8s says: %s\n", $name,shift(@_));};
-		my $stitcher = get($callback, $restofgrammar);
+		my $character_name=shift(@_);
+		my @lines_of_dialogue_for_this_character = @_;
+		my $callback = sub{$captured.=sprintf ("%8s says: %s\n", $character_name,shift(@_));};
+		my $stitcher = get($callback, a(@lines_of_dialogue_for_this_character));
 		return $stitcher;
 	}
 
@@ -1324,14 +1572,14 @@ easily use that functionality at several different points in the grammar.
 	sub mccoy_diag { [ "He's", 'dead', ',', trekname, a('!', '.') ] }
 	sub mccoy_rant1 { [ql('You green-blooded Vulcan'), a('!', '.') ] }
 	sub mccoy_isms {
-		attributeline('McCoy', a(mccoy_job, mccoy_diag, mccoy_rant1)) 
+		attributeline('McCoy', mccoy_job, mccoy_diag, mccoy_rant1) 
 	}
 
 	sub spock_awe {['Fascinating', ',', trekname, '.']}
 	sub spock_logic {['Highly', 'illogical',',', trekname, '.']}
 	sub spock_sensors { [ql("It's life ,"), trekname, ql(', but not as we know it .')]}
 	sub spock_isms {
-		attributeline('Spock', a(spock_awe, spock_logic, spock_sensors))
+		attributeline('Spock', spock_awe, spock_logic, spock_sensors)
 	}
 	
 	sub kirk_dipolomacy1 {ql('We come in peace .')}
@@ -1341,28 +1589,28 @@ easily use that functionality at several different points in the grammar.
 	sub kirk_to_bones {ql('Just fix him , Bones')}
 	sub kirk_solution {ql('Activate ship self-destruct mechanism .')}
 	sub kirk_isms {
-		attributeline('Kirk', a(
+		attributeline('Kirk', 
 			kirk_dipolomacy1, 
 			kirk_dipolomacy2,
 			kirk_to_scotty,
 			kirk_to_spock,	
 			kirk_to_bones,	
 			kirk_solution
-		))
+		)
 	}
 
 	sub scotty_phy101 {ql('Ya kenna change the laws of physics .')}
 	sub time_units {qa('minutes hours days weeks')}
 	sub scotty_estimate {[ ql("I'll have it ready for you in three"), time_units, '.' ]}
 	
-	sub scotty_isms {attributeline('Scotty', a(scotty_phy101, scotty_estimate))}
+	sub scotty_isms {attributeline('Scotty', scotty_phy101, scotty_estimate)}
 	
 	
 	sub alien_isms {attributeline('alien', 'weeboo')}
 	
 	
 	sub trek_isms {a(mccoy_isms, spock_isms, kirk_isms, scotty_isms, alien_isms )}
-	sub trek_script {some(trek_isms)}	
+	sub trek_script {some(trek_isms), end}	
 	
 	$grammar = parse(  trek_script );
 		
@@ -1432,14 +1680,15 @@ The above example is included as a test in the t directory of the tarball from C
 
 Note that when we call the "attributeline" extension, we pass in a string that 
 isn't part of the grammar to be searched for in the text, it is part of the
-text output. In the line below, we call "attributeline('McCoy', a(...))", 
+text output. In the line below, we call "attributeline('McCoy', ...)", 
 but we aren't looking for "McCoy" in the text being parsed, we pass in "McCoy"
 so we can use that string in the formatted output.
 
 	sub mccoy_isms {
-		attributeline('McCoy', a(mccoy_job, mccoy_diag, mccoy_rant1)) 
+		attributeline('McCoy', mccoy_job, mccoy_diag, mccoy_rant1) 
 	}
 
+See the section on "extensions" for more details.
 
 =head1 HOOKS FOR STREAMS
 
@@ -1541,7 +1790,6 @@ The end of text (perl \Z) is needed to allow grammars to be written that
 define an entire text. Otherwise, "parse" or "match" will match as far as they can,
 then stop. If there is any text left, they still pass. If you want them to match
 the entire string, then end your grammar with the "eot" function.
-
 
 
 =head2 skip, noskip

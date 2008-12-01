@@ -9,6 +9,8 @@ lib/Parse/Gnaw/Decomment.pm
 ./t/00-load.t
 ./t/100_001_parse.t
 ./t/100_010_parse.t
+./t/100_100_word_boundary.t
+./t/100_150_end_assertion.t
 ./t/100_200_match.t
 ./t/100_210_call_in_one_line.t
 ./t/100_220_match.t
@@ -30,7 +32,6 @@ lib/Parse/Gnaw/Decomment.pm
 ./t/100_660_multi_c.t
 ./t/100_670_c_with_alternate.t
 ./t/100_700_modify.t
-./t/100_800_word_boundary.t
 ./t/100_900_swap.t
 ./t/100_910_swap.t
 ./t/100_920_swap.t
