@@ -1353,7 +1353,7 @@ a few steps:
 	2: deal with any remaining grammar arguments passed in
 	3: return a "stitcher"
 
-head3 preprocessed arguments
+=head3 preprocessed arguments
 
 preprocessed arguments are arguments passed into your extension subroutine
 that do not translate directly into grammar components but instead are used
@@ -1394,7 +1394,7 @@ group multiple components into array references.
 The "slist" function then passes the "item" and "separator" pieces
 directly into other existing components.
 
-head3 remaining grammar arguments
+=head3 remaining grammar arguments
 
 If your extension passes in normal grammar components, such as literal
 strings, or arrays of literal strings, or functions such as "a" or "bb" 
