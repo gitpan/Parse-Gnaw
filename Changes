@@ -80,3 +80,11 @@ add the "az" function (equivalent to =~ m/\A ... \Z/)
 add large chunks of text to the "extensions" section in POD.
 Hopefully extensions are explained sufficiently that folks
 can create their own without too many questions.
+
+0.34	2008-12-03
+
+The "noskip" function has been implemented. It was coded
+to be a generic function really to handle any kind of
+"skip" function we want. The "noskip" function was really
+an extension of this generic function.
+

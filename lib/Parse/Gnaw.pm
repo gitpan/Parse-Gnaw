@@ -5,7 +5,7 @@
 1; 
 { 
 	package Parse::Gnaw; 
-	our $VERSION = '0.32'; 
+	our $VERSION = '0.34'; 
 
 	use Exporter;
 	@ISA = qw( Exporter );
@@ -782,9 +782,7 @@ sub __gnaw__curr_character { # return current character in text linked list
 
 
 #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-# Note: if you create your own "skip" subroutine, make sure it doesn't
-# use the __gnaw__curr_character routine because the __gnaw__curr_character 
-# will call the "skip" subroutine, and things will go kersplewy.
+# skip functionality.
 #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 our $__gnaw__skip_whitespace = sub{
 #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -830,6 +828,42 @@ our $__gnaw__skip_nothing = sub{};
 #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 our $__gnaw__skip_code = $__gnaw__skip_whitespace;
 #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+
+
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+our %__gnaw__skip_callbacks = (
+	'whitespace'=> $__gnaw__skip_whitespace,
+	'nothing' => $__gnaw__skip_nothing,
+
+);
+
+
+our @__gnaw__list_of_stored_skip_callbacks;
+
+sub __gnaw__store_old_skip_and_assign_new_skip { 
+	my ($newskipcallback) = @_;
+	push(@__gnaw__list_of_stored_skip_callbacks, $__gnaw__skip_code);
+
+	$__gnaw__skip_code=$newskipcallback;
+}
+
+sub __gnaw__discard_current_skip_and_restore_previous_skip{
+	my $oldcallback = pop(@__gnaw__list_of_stored_skip_callbacks);
+
+	$__gnaw__skip_code=$oldcallback;
+}
+
+
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
 
 sub __gnaw__string_describing_single_text_element { # pass in text element, return string description of element
 	my ($curr)=@_; 
@@ -1125,6 +1159,124 @@ sub __gnaw__given_instruction_return_next_instruction {
 #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 
+sub noskip {
+	__gnaw__set_skip('nothing', @_);
+}
+
+
+
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+sub __gnaw__set_skip {
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+	########GNAWMONITOR( "__gnaw__skip_instruction");
+	my $whattoskip = shift(@_);
+
+	unless(exists($__gnaw__skip_callbacks{$whattoskip})) {
+		__gnaw__die("ERROR: tried to skip nonexistent type ($whattoskip)");
+	}
+
+	my $restofgrammarstitcher = series(@_);
+
+
+	my $begin_code = {
+		opcode => 'skip begin instruction',
+		coderef=> \&__gnaw__skip_begin_callback,
+		value => $whattoskip,
+	};
+
+	my $beginstitcher = generate_stitcher($begin_code, $begin_code);
+
+	
+	my $end_code = {
+		opcode => 'skip end instruction',
+		coderef=> \&__gnaw__skip_end_callback,
+	};
+
+	my $endstitcher = generate_stitcher($end_code, $end_code);
+
+	
+
+	my $instruction_if_fail = {
+		opcode => 'skip restore on fail',
+		coderef => \&__gnaw__skip_parse_fail,
+		main => $begin_code,
+	};
+
+	$begin_code->{fallback}=$instruction_if_fail;
+
+
+	# the begin command feeds into the series
+	$beginstitcher->('setnext', ($restofgrammarstitcher->('getfirst')));
+	$restofgrammarstitcher->('setprevious', ($beginstitcher->('getlast')));
+
+	# the series command feeds into the end command
+	$restofgrammarstitcher->('setnext', ($endstitcher->('getfirst')));
+	$endstitcher->('setprevious', ($restofgrammarstitcher->('getlast')));
+
+	my $skipstitcher = generate_stitcher($begin_code, $end_code);
+
+	return $skipstitcher;
+}
+
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+sub __gnaw__skip_begin_callback {
+	########GNAWMONITOR( "__gnaw__skip_begin_callback");
+	my $thisinstruction = __gnaw__get_current_instruction_pointer();
+	my $nextinstruction = __gnaw__given_instruction_return_next_instruction($thisinstruction);
+	__gnaw__move_current_instruction_pointer($nextinstruction);
+
+	my $whattoskip = $thisinstruction->{value};
+	my $fallback = $thisinstruction->{fallback};
+	########GNAWMONITOR( "__gnaw__skip command: setting skip to $whattoskip");
+	########GNAWMONITOR( __gnaw__string_showing_user_current_location_in_text() );
+
+	my $textmarker = __gnaw__create_new_marker_before_current_element
+		######## ( 'skip_callback command setting a fallback position if rest of grammar fails' )
+	;	
+	__gnaw__push_fallback_postition($fallback, $textmarker);
+
+	# now set the new skip value to 'whattoskip'
+	my $newskipcallback = $__gnaw__skip_callbacks{$whattoskip};
+
+	__gnaw__store_old_skip_and_assign_new_skip($newskipcallback);
+}
+
+sub __gnaw__skip_end_callback {
+	########GNAWMONITOR( "__gnaw__skip_end_callback");
+	my $thisinstruction = __gnaw__get_current_instruction_pointer();
+	my $nextinstruction = __gnaw__given_instruction_return_next_instruction($thisinstruction);
+	__gnaw__move_current_instruction_pointer($nextinstruction);
+
+	# we can pop off the fallback position and discard them.
+	my ($fallback_cmd, $fallback_marker) = __gnaw__pop_fallback_postition(); 
+
+	# we created this marker at the start of the skip command. can delete it now.
+	__gnaw__delete_this_text_element($fallback_marker);
+
+	# restore the old skip value
+	__gnaw__discard_current_skip_and_restore_previous_skip();
+
+}
+
+
+sub __gnaw__skip_parse_fail {
+	# restore the old skip value
+	__gnaw__discard_current_skip_and_restore_previous_skip();
+
+	# something failed while parsing. re-throw the failure.
+	__gnaw__parse_failed();
+
+}
+
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# __gnaw__literal is the low level, single literal, operation.
+# the "l" and "ql" and other functions must break their input
+# parameters down into individual calls to __gnaw__literal.
 #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++

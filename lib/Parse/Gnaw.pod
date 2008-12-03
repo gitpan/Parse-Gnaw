@@ -1152,6 +1152,29 @@ previous text from memory.
 
 	$grammar = match(some('keyword', commit, 'blah', 'blah', 'blah'));
 
+
+
+=head2 noskip
+
+By default, Parse::Gnaw skips whitespace in between literals and character classes.
+If you do not want to skip whitespace, use the "noskip" function. It will turn off
+skipping and look for all the grammar components to not have any extra whitespace 
+in them. 
+
+	$grammar = match('x', noskip('hello', 'world'), 'y');
+
+	# turn off skipping after x, no space between literals till skipping turned back on.
+	ok($grammar->('xhelloworld  y')==1, "1 match found");
+
+	# this doesn't match because of space between x and hello
+	ok($grammar->('x  helloworld  y')==0, "2 match not found");
+
+	# this doesn't match because of space between x and hello
+	ok($grammar->('xhello world  y')==0, "3 match not found");
+
+Note that the "noskip" takes effect immediately, so there is no skipping
+between the 'x' literal and the literal 'hello'.
+
 =head2 positional markers
 
 =head2 bb
@@ -1492,7 +1515,7 @@ a sequence and generate a single stitcher.
 The "slist" extension is an example of an extension that uses the "series"
 function to generate the stitcher.
 
-head3 trekism extension explained
+=head3 trekism extension explained
 
 The trekisms grammar, shown elsewhere in this document, contains an
 interesting grammar extension. It doesn't really look like a grammar 
@@ -1780,26 +1803,6 @@ is to process the entire text being parsed in memory.
 
 
 =head1 NOT IMPLEMENTED YET
-
-=head2 end of input text
-
-start of text (the perl regexp equivalent of \A) isn't needed in Parse::Gnaw.
-Instead, call the "parse" function, which only will look at the start of the text.
-
-The end of text (perl \Z) is needed to allow grammars to be written that
-define an entire text. Otherwise, "parse" or "match" will match as far as they can,
-then stop. If there is any text left, they still pass. If you want them to match
-the entire string, then end your grammar with the "eot" function.
-
-
-=head2 skip, noskip
-
-need to turn skipping on and off somehow. need to go back to whatever it was
-if a parse fails, no matter where it fails. 
-
-I think we default to skip, and then have the "noskip" be an enclosing thing,
-
-	$grammar = match('a', noskip('b', 'c', 'd'), 'e');
 
 =head2 tok (token)
 
