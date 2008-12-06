@@ -1175,6 +1175,130 @@ in them.
 Note that the "noskip" takes effect immediately, so there is no skipping
 between the 'x' literal and the literal 'hello'.
 
+Also, note that "noskip" must enclose whatever grammar components you want it
+to be applied to. There is no way for a grammar to change the "skip" value
+for all components after it. You cannot do something like this:
+
+
+	$grammar = match(a( ['hello'], ['howdy',noskip] ), 'world' );
+
+In the example above, there are two alternates, 'hello' and 'howdy'. It would
+appear that in this grammar, if the alternate turns out to be 'howdy', that 
+the parser should not skip anything when it looks for 'world'. This attempts
+to have the "noskip" function effect the grammar outside of the "noskip" scope.
+The "noskip" function does not work that way. You must limit where the "noskip"
+function applies itself by putting those components inside the "noskip" function.
+
+If you really wanted either 'hello' skip 'world', or, 'howdy' noskip 'world', 
+you would have to unroll the code.
+
+	$grammar = match( a( ['hello','world'], ['howdy', noskip('world')] ));
+
+=head2 skipnow
+
+By default, Parse::Gnaw skips whitespace in between literals and character classes.
+So, why would you need an instruction to tell it to skip? When you are about to call
+"noskip".
+
+	sub name { some(wrd) }
+	$grammar = match( 'hello', name, '!' );
+	ok($grammar->("hello Alice !")==1, "expect match");
+	ok($grammar->("hello a b c d !")==1, "might not have expected this to match");
+
+In the above example, we use "some" to look for one or more "wrd" characters. We might
+use this to look for an identifier, a name, or similar. The problem is that the "wrd"
+function will "skip" whitespace every time it is called. Which means it will skip
+whitespace every time the "some" function calls it. Which means it will match the 
+string "a b c d", which might not be what we expected.
+
+To force the parser to not skip, we might try putting "noskip" around the "wrd" function.
+
+
+	sub name { [some(noskip(wrd))] }
+	$grammar = match( 'hello', name );
+	ok($grammar->("hello Alice")==0, "this won't match");
+	ok($grammar->("helloAlice")==1, "this will match");
+
+In the above example, we call "noskip" around the "wrd" function, but that means the
+parser will not skip the first time it enters the "some" function, which means it
+will not skip between "hello" and the first "wrd" character in the "some" function.
+So, the above grammar will only match "helloAlice" or similar situations.
+
+To overcome this, we need to be able to command the parser to skip right now. And
+then we need to put that skip right now function into the grammar just prior to 
+the "some" function. This will cause the parser to skip whitespace, and then look for 
+"some" "wrd" characters that are separated by no whitespace.
+
+	sub name { [skipnow, some(noskip(wrd))] }
+	$grammar = match( 'hello', name );
+	ok($grammar->("hello Alice")==0, "this won't match");
+	ok($grammar->("helloAlice")==1, "this will match");
+
+In the above example, we tell the parser to "skip" and then we look for some
+wrd characters. Note that "skip" will skip zero or more whitespace. This means
+we could also use "anyspace" as a synonym for "skip".
+
+
+=head2 id (identifier) function
+
+Because doing a series of "wrd" characters with no spaces in between them and
+word boundaries on both ends, with a "skip" function at the front is rather
+wordy, the "id" function has been provided for you.
+
+It takes one optional parameter, and if you provide one parameter, then the
+"id" function passes it into the "get" function for you.
+
+The declaration for "id" can be simplified to this:
+
+	sub id { 
+		if(scalar(@_)) {
+			my $getthingy=shift(@_);
+			return series(skip, bb, get($getthingy, some(noskip(wrd))), bb);
+		} else {
+			return series(skip, bb, some(noskip(wrd)), bb);
+		}
+	}
+
+You can use it to match but not capture:
+
+	$grammar = match('hello', id, '!');
+	ok($grammar->("hello Alice!")==1, "match");
+
+Or to match and capture
+
+	my $name='';
+	$grammar = match('hello', id(\$name), '!');
+	ok($grammar->("hello Alice!")==1, "match");
+	ok($name eq 'Alice', "check capture occurred");
+
+=head2 token
+
+The "token" function is if you want to define a series of items that are to occur
+with no skipping in between, but might have skipping before and after.
+
+Sort of like "id", but without the "bb" function on either end.
+
+If you wanted to define an operator that used more than one character, but you
+wanted to require that they not be separated by any spacing (but could allow
+spacing before and after), then you could use "token" to define that.
+
+Say you were looking for a digit followed by a letter, you could define it like this:
+
+	sub diglet { token(dgt, cc('a-zA-Z') }
+
+A simplified declaration for "token" might look like this:
+
+	sub token {  series( skipnow, noskip( @_ ) ) }
+
+It's not a very complicated function, but it summarizes the idea of a 'token'
+in parsing well, so it is provided for your convenience.
+
+
+
+
+
+
+
 =head2 positional markers
 
 =head2 bb
@@ -1803,17 +1927,6 @@ is to process the entire text being parsed in memory.
 
 
 =head1 NOT IMPLEMENTED YET
-
-=head2 tok (token)
-
-tok might be a shortcut for "noskip".
-
-It might also try to detect if the thing passed in is \w, and if so,
-put word boundary position markers on the front and back of the token.
-
-Or maybe we have a mode where all literals that begin and end in \w 
-all get turned into tokens with word boundary position markers at 
-start and end.
 
 
 =head2 matchall swapall

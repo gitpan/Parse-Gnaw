@@ -5,7 +5,7 @@
 1; 
 { 
 	package Parse::Gnaw; 
-	our $VERSION = '0.34'; 
+	our $VERSION = '0.36'; 
 
 	use Exporter;
 	@ISA = qw( Exporter );
@@ -1271,6 +1271,40 @@ sub __gnaw__skip_parse_fail {
 	__gnaw__parse_failed();
 
 }
+
+
+
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# the "skipnow" function will skip zero or more whitespace characters,
+# even if the "noskip" is set. Especially if "noskip" is set. 
+# that's probably when you'll use it.
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+sub skipnow { 
+
+	########GNAWMONITOR( "skipnow command");
+	my $compiled_code = {
+		opcode => 'skipnow',
+		coderef=> \&__gnaw__skipnow_callback,
+	};
+
+	my $stitcher = generate_stitcher($compiled_code, $compiled_code);
+
+	return $stitcher;
+}
+
+
+sub __gnaw__skipnow_callback {
+	my $thisinstruction = __gnaw__get_current_instruction_pointer();
+	my $nextinstruction = __gnaw__given_instruction_return_next_instruction($thisinstruction);
+	__gnaw__move_current_instruction_pointer($nextinstruction);
+
+	$__gnaw__skip_whitespace->();
+
+}
+
+
+
 
 #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -2893,6 +2927,29 @@ sub slist {
 
 sub az { parse( @_, end ) }
 
+
+
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# id = identifier
+# id will get one or more "wrd" characters, with no whitespace in between them,
+# and with the "bb" boundary function on both ends.
+# use this to match a variable name or similar identifier type thingy.
+# by default, you pass in no parameters.
+# if you pass in a parameter, "identifier" will treat that as a "get" input
+# and do the get for you and pass in whatever you passed in to "get".
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+sub id { 
+	if(scalar(@_)) {
+		my $getthingy=shift(@_);
+		return series(skipnow, bb, get($getthingy, some(noskip(wrd))), bb);
+	} else {
+		return series(skipnow, some(noskip(wrd)));
+		return series(skipnow, bb, some(noskip(wrd)), bb);
+	}
+}
+
+
+sub token {  series( skipnow, noskip( @_ ) ) }
 
 #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++

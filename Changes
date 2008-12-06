@@ -88,3 +88,10 @@ to be a generic function really to handle any kind of
 "skip" function we want. The "noskip" function was really
 an extension of this generic function.
 
+0.36	2008-12-05
+
+add the "skipnow" function. works now.
+rename the "identifier" function to "id" function.
+Add the "token" function.
+Add some more tests.
+
