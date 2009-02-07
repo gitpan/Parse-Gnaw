@@ -95,3 +95,7 @@ rename the "identifier" function to "id" function.
 Add the "token" function.
 Add some more tests.
 
+0.40	2009-01-07
+
+add slideshow directory
+

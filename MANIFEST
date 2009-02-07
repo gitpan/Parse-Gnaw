@@ -6,6 +6,9 @@ genmanifest.pl.script
 lib/Parse/Gnaw.pm
 lib/Parse/Gnaw.pod
 lib/Parse/Gnaw/Decomment.pm
+slideshow/gnaw_slides.odp
+slideshow/logo.odt
+slideshow/logo.png
 ./t/00-load.t
 ./t/100_001_parse.t
 ./t/100_010_parse.t

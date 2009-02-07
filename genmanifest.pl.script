@@ -45,4 +45,7 @@ genmanifest.pl.script
 lib/Parse/Gnaw.pm
 lib/Parse/Gnaw.pod
 lib/Parse/Gnaw/Decomment.pm
+slideshow/gnaw_slides.odp
+slideshow/logo.odt
+slideshow/logo.png
 
