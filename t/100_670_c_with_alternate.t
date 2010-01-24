@@ -13,18 +13,18 @@ my $grammar;
 
 $grammar = parse( 
 	a(  
-		['hello', c('world'), 'my', 'name', 'is', c(something)],
-		['howdy', c(something)]
+		['hello', c('world'), 'my', 'name', 'is', c(something), '.'],
+		['howdy', c(something), '.']
 	) 
 
 );
 
-ok($grammar->('hello world my name is Alice')==1, "1 match");
+ok($grammar->('hello world my name is Alice.')==1, "1 match");
 
 ok($c1 eq 'world', 'c1 is world');
 ok($c2 eq 'Alice', 'c2 is alice');
 
-ok($grammar->('howdy Bob')==1, "1 match");
+ok($grammar->('howdy Bob.')==1, "1 match");
 
 ok($c1 eq 'Bob', 'c1 is Bob');
 

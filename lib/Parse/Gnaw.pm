@@ -5,7 +5,7 @@
 1; 
 { 
 	package Parse::Gnaw; 
-	our $VERSION = '0.40'; 
+	our $VERSION = '0.50'; 
 
 	use Exporter;
 	@ISA = qw( Exporter );
@@ -2043,10 +2043,10 @@ sub __gnaw__grdy_rest_of_grammar {
 # user function to create a greedy quantifier
 # g( [min, max?], grammar component, component...? )
 #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-sub g {
-	########GNAWMONITOR( "g (greedy) command");
+sub greedy {
+	########GNAWMONITOR( "greedy command");
 
-	# g( [min, max?, consumable?], patternstitcher(s), );
+	# greedy( [min, max?, consumable?], patternstitcher(s), );
 	#
 	# min must be defined and must be zero or larger and an integer.
 	#
@@ -2141,8 +2141,8 @@ sub g {
 
 # greedy shortcuts
 
-sub any  { g([0], @_) }		# zero or more
-sub some { g([1], @_) }		# one or more
+sub any  { thrifty([0], @_) }		# zero or more
+sub some { thrifty([1], @_) }		# one or more
 
 sub anything  { any (thing) } 	# zero or more 'things'
 sub something { some(thing) }	# one or more 'things'
@@ -2151,7 +2151,7 @@ sub something { some(thing) }	# one or more 'things'
 # 0 or 1 of whatever. i.e. 
 # maybe('hello', 'there') 'Alice'
 # will look for "Alice" that might or might not be preceded by "hello" "there".
-sub maybe { g([0,1], @_) }	
+sub maybe { greedy([0,1], @_) }	
 
 
 #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -2334,10 +2334,10 @@ sub __gnaw__tfty_rest_of_grammar {
 # user function to create a greedy quantifier
 # g( [min, max?], grammar component, component...? )
 #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-sub t {
+sub thrifty {
 	########GNAWMONITOR( "thrifty command");
 
-	# t ( [min, max?, consumable?] , patternstitcher(s) );
+	# thrifty ( [min, max?, consumable?] , patternstitcher(s) );
 	#
 	# min must be defined, must be zero or larger, and an integer.
 	#

@@ -657,17 +657,17 @@ The second alternate is the literal 'howdy' followed by 'partner'.
 The alternates can be any sequence of grammar components wrapped in 
 an array reference.
 
-=head2 g and t (greedy and thrifty quantifiers)
+=head2 greedy and thrifty quantifiers
 
-The "g" and "t" functions are quantifier functions. They allow you 
+The "greedy" and "thrifty" functions are quantifier functions. They allow you 
 to define a grammar that looks for some pattern that repeats for
 some number of times.
 
 The format for a quantifier call looks like this:
 
-	g ( [min, max(?)], grammar component(, component)* )
+	greedy ( [min, max(?)], grammar component(, component)* )
 
-The first parameter to the "g" or "t" function is an array reference.
+The first parameter to the "greedy" or "thrifty" function is an array reference.
 This contains the parameters that control how the quantifier works.
 The "min" value determines the minimum number of times the pattern
 must match before considered a pass. The "max" value is optional. If 
@@ -678,50 +678,50 @@ The remaining one or more parameters define the pattern to which
 the quantifier will be applied. If more than one are supplied, 
 they will be applied as one large sequence.
 
-The difference between "g" and "t" is how quickly the quantifier
-will try to match. The "g" function is greedy and will try to match
+The difference between "greedy" and "thrifty" is how quickly the quantifier
+will try to match. The "greedy" function is greedy and will try to match
 as many patterns as possible. If it fails to match, the greedy 
 quantifier will start backing off pattern counts and try to let the
 rest of the grammar find a match.
 
-The "t" function is thrifty and will try to match as few patterns
+The "thrifty" function is thrifty and will try to match as few patterns
 as possible. If the rest of the grammar fails to match, the 
 thrifty pattern will try to match another pattern, before trying
 the rest of the grammar.
 
 	# seventeen or more 'g' or 'a' or 't' or 'c' characters.
-	$grammar = match( g([17], cc('gatc')) ); 
+	$grammar = match( greedy([17], cc('gatc')) ); 
 
 	# one or more "word" characters
-	$grammar = match( g([1], wrd) );
+	$grammar = match( greedy([1], wrd) );
 
 	# zero or more "digit" characters
-	$grammar = match( g([0], dgt) );
+	$grammar = match( greedy([0], dgt) );
 
 	# at least 3 and up to 8 letters
-	$grammar = match( g([3,8], cc('a-zA-Z')));
+	$grammar = match( greedy([3,8], cc('a-zA-Z')));
 
-Note that the "g" and "t" quantifiers are functions that can accept
+Note that the "greedy" and "thrifty" quantifiers are functions that can accept
 one or more parameters passed into them. These parameters can be
 other grammar components, string literals, or array references
 for grouped bits of grammar.
 
 	# one or more 'hello' followed by 'world'
-	$grammar = match( g([1], 'hello', 'world') )
+	$grammar = match( greedy([1], 'hello', 'world') )
 
-Shorcuts are provided for g([0],...) and g([1], ...), called 
+Shorcuts are provided for thrifty([0],...) and thrifty([1], ...), called 
 "any" and "some" respectively
 
 =head2 any function
 
 =head2 some function
 
-Because greedy quantifiers of "zero or more" and "one or more" are fairly 
+Because thrifty quantifiers of "zero or more" and "one or more" are fairly 
 common, shortcuts 'any' and 'some' have been provided.
 
-	$grammar = match( any(dgt) ); # zero or more digits
+	$grammar = match( any(dgt) ); # zero or more (thrifty) digits
 
-	$grammar = match( some(wrd) ); # one or more word characters.
+	$grammar = match( some(wrd) ); # one or more (thrifty) word characters.
 
 The "any" and "some" functions take any number of input parameters,
 and the parameters can be string literals, array references, and other
@@ -752,7 +752,7 @@ You can use these in your grammars to make them slightly more readable.
 
 =head2 maybe function
 
-The maybe function is a shortcut that wraps the "g" function with the
+The maybe function is a shortcut that wraps the "greedy" function with the
 quantity hardcoded to [0,1]. This means whatever you put into the 
 "maybe" function is optional. It may be there or it may not and the
 parse will still pass.
@@ -1434,24 +1434,24 @@ standard grammar building blocks, and then returning the parser code.
 =head2 any some anything something maybe
 
 Another example of extensions are the quantifier shortcut functions. 
-The low level components are the "g" (greedy quantifier)
+The low level components are the "thrifty" quantifier)
 and "thing" (any single character) components. From there, we declare the
 extensions:
 
-	sub any  { g([0], @_) }		# zero or more
-	sub some { g([1], @_) }		# one or more
+	sub any  { thrifty([0], @_) }		# zero or more
+	sub some { thrifty([1], @_) }		# one or more
 
 	sub anything  { any (thing) } 	# zero or more 'things'
 	sub something { some(thing) }	# one or more 'things'
 
 	sub maybe { g([0,1], @_) }
 
-The "any" and "some" functions are simple extensions of the "g" function, 
+The "any" and "some" functions are simple extensions of the "thrifty" function, 
 taking whatever parameters are passed into "any" and "some" and passing
-them directly onto the "g" function. Instead of preprocessing the parameters
+them directly onto the "thrifty" function. Instead of preprocessing the parameters
 like we did in the "qa" function, instead we hardcode some default values 
 for the quantifier "min" value. i.e. the [0] and [1] parts of the code
-passed into the "g" function.
+passed into the "thrifty" function.
 
 =head2 slist
 
@@ -1556,12 +1556,12 @@ Since you removed any preprocessed arguments from the @_ array, your
 extension should be able to pass the remaining @_ array into whatever
 lower level functional components you want.
 
-For example, the "some" function is a shortcut to the "g" (greedy)
+For example, the "some" function is a shortcut to the "thrifty"
 function, forcing the quantity to be "1 or more". You can pass any
 number of grammar components into the "some" function. The "some"
-function simply passes them all directly into the "g" function.
+function simply passes them all directly into the "thrifty" function.
 
-	sub some { g([1], @_) }
+	sub some { thrifty([1], @_) }
 
 The "az" function is an extension that wraps the "parse" function,
 assumes everything passed in is a grammar component and adds the
@@ -1578,8 +1578,8 @@ inside a larger grammar and not even know it is an extension because
 it returns a stitcher just like any other low level component.
 
 In the case of the "some" function, the stitcher is created by the 
-"g" function, and since it is the last expression of the "some" 
-subroutine, the return value of the "g" function is the return 
+"thrifty" function, and since it is the last expression of the "some" 
+subroutine, the return value of the "thrifty" function is the return 
 value of the "some" function. Therefore the "some" extension 
 returns a stitcher without any explicit return call.
 

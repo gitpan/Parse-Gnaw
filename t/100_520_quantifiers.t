@@ -7,7 +7,7 @@ use Parse::Gnaw;
 
 my $capture='nomatch';
 
-$grammar = match(get(\$capture, g([5,8], 'a', 'b')));
+$grammar = match(get(\$capture, greedy([5,8], 'a', 'b')));
 
 
 ok($grammar->('912039 ababababab fdghgh')==1, "1 match");

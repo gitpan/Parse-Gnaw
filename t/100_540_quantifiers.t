@@ -9,7 +9,7 @@ use Parse::Gnaw;
 my @capture=('','','','','','');
 
 
-sub greedya {get(\@capture, some('a'))}
+sub greedya {get(\@capture, greedy([1],'a'))}
 
 
 

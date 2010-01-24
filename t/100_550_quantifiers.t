@@ -8,8 +8,8 @@ use Parse::Gnaw;
 my @capture;
 
 
-sub greedya {get(\@capture, g([1],'a'))}
-sub thriftya {get(\@capture, t([1],'a'))}
+sub greedya {get(\@capture, greedy([1],'a'))}
+sub thriftya {get(\@capture, thrifty([1],'a'))}
 
 
 
