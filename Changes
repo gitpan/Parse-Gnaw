@@ -105,3 +105,8 @@ Get rid of "g" and "t" functions and replace with "greedy" and "thrifty".
 Change "any" and "some" to be thrifty quantifiers instead of greedy.
 Change all tests to match new code function.
 
+0.51	2010-01-29
+
+update slideshow to match the 0.50 changes.
+
+

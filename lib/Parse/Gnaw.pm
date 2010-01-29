@@ -5,7 +5,7 @@
 1; 
 { 
 	package Parse::Gnaw; 
-	our $VERSION = '0.50'; 
+	our $VERSION = '0.51'; 
 
 	use Exporter;
 	@ISA = qw( Exporter );
@@ -2139,7 +2139,16 @@ sub greedy {
 }
 
 
-# greedy shortcuts
+# a perl regular expression like ".*" will consume the entire string first,
+# then release one character at a time until it has a match.
+# this is a problem if you're trying to parse an infinite amount of text.
+# To parse an infinite amount of text, open ended quantifiers should be thrifty.
+# This will force them to match as little as possible first, then consume a little
+# more until it finds a match.
+# for this reason, the "any" and "some" shortcuts are thrift so that grammars
+# can easily be used to parse infinite text.
+
+# thrifty shortcuts
 
 sub any  { thrifty([0], @_) }		# zero or more
 sub some { thrifty([1], @_) }		# one or more
@@ -2151,6 +2160,8 @@ sub something { some(thing) }	# one or more 'things'
 # 0 or 1 of whatever. i.e. 
 # maybe('hello', 'there') 'Alice'
 # will look for "Alice" that might or might not be preceded by "hello" "there".
+# because "maybe" isn't open ended (at most, look for 1 match), it won't
+# consume an entire file the way ".*" would. So for now, "maybe" is greedy.
 sub maybe { greedy([0,1], @_) }	
 
 
