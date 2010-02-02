@@ -109,4 +109,8 @@ Change all tests to match new code function.
 
 update slideshow to match the 0.50 changes.
 
+0.52	2010-02-02
+
+Created a benchmark script to compare Parse::Gnaw to Parse::RecDescent
+See benchmark/benchmark.pl in the tarball
 

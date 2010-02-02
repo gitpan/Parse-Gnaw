@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:                Parse-Gnaw
-version:             0.51
+version:             0.52
 abstract:            An extensible parser. Define grammars using subroutine calls.
 license:             ~
 author:              

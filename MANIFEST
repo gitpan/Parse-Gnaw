@@ -46,4 +46,5 @@ slideshow/logo.png
 ./t/boilerplate.t
 ./t/pod-coverage.t
 ./t/pod.t
+./benchmark/benchmark.pl
 META.yml                                 Module meta-data (added by MakeMaker)

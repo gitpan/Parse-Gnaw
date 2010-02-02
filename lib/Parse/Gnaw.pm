@@ -5,7 +5,7 @@
 1; 
 { 
 	package Parse::Gnaw; 
-	our $VERSION = '0.51'; 
+	our $VERSION = '0.52'; 
 
 	use Exporter;
 	@ISA = qw( Exporter );

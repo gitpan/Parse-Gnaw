@@ -36,6 +36,15 @@ foreach my $test (@testnames) {
 }
 
 
+my @benchmarks = `ls ./benchmark/*.pl`;
+
+foreach my $benchmark (@benchmarks) {
+	$benchmark =~ s{\n}{};
+	print $out "$benchmark\n";
+}
+
+
+
 __DATA__
 Changes
 MANIFEST
