@@ -1,188 +1,46 @@
 Parse-Gnaw
 
-Parse::Gnaw - An extensible parser. Define grammars using subroutine calls.
-Define your own grammar extensions by defining new subroutines. Parse text
-in memory or from/to files or other streams.
+This is a parser designed in pure perl without resorting to 
+regular expressions. Rules are made up of array references.
+Subroutines are provided to help generate properly formatted
+rules.  
 
-Gnaw is a perl module which implements full regular expressions and 
-full text parsing grammars using nothing but pure perl code limited 
-to subroutine closures, exception trapping via eval, and basic perl 
-variables such as scalars, hashes, and arrays. 
+This is generation 2 of Parse::Gnaw, starting from revision 0.600.
+Previous revisions had grammar calls return code references to 
+dynamically generated subroutines (closures). Gen 2 grammar calls
+return references to dynamically generated arrays. 
 
-Parse::Gnaw does not use regular expressions under the hood.
+The main improvement there is that since it isn't a subroutine call,
+a recursive rule doesn't automatically blow up. Gen1 Parse::Gnaw
+would go into an infinite loop if a rule was recursive.
 
-You write your grammar in pure perl. There is no intermediate 
-"parser language" that then gets interpreted into something executable.
+Another minor advantage is that arrays are more friendly to 
+Data::Dumper.
 
-When you do a "use Parse::Gnaw", the Gnaw module will import a 
-number of functions directly into your namespace. Yes, this is 
-completely bad form for normal modules. But this is not a normal 
-module. The imported subroutines include regular expression and 
-parsing functions for matching, quantifiers, literals, 
-alternations, character classes, and so on. You build up your 
-grammar by calling these functions. The final call will return 
-a code reference. This code reference is your grammar.
+Another major upgrade is that Parse::Gnaw version 2 is intended
+to support parsing multi-dimensional text, rather than simple
+one-dimensional strings. The string format is merely a linked
+list, so the text can be any shape, size, or interconnectivity
+you want.
 
-When you dereference that grammar, if it is a "match" function, 
-then you pass in the string you want to parse.
+Related to multi-dimensional text parsing is the ability to
+parse multi-dimensional text in either linear or non-linear
+mode. For example, the following two dimension text block:
 
-	use Parse::Gnaw;
+a b c
+d e f
+h i j
 
-	# create the grammar
-	my $grammar = match('hello');
+If you use straight line parsing, it will match the pattern:
 
-	# apply the grammar to a string
-	if($grammar->('hello world')) {
-		print "match\n";
-	} else {
-		print "no match";
-	}
+	'a', 'b', 'c'
 
-You can also create the grammar and execute it in one step:
+If you enable non-linear parsing, it will also match the pattern:
 
-	my $texttoparse = "howdy partner";
+	'b', 'c', 'f', 'j', 'i'
 
-	if(match('hello', 'world')->($texttoparse)) {
-		print "match\n";
-	} else {
-		print "no match\n";
-	}
-
-Note the above example translated into perls regular expression syntax 
-would look something like this:
-
-	my $texttoparse = "howdy partner";
-
-	if($texttoparse =~ m{hello\s*world}) {
-		print "match\n";
-	} else {
-		print "no match\n";
-	}
-
-You can build up more complicated grammars fairly easily.
-This one looks for a sentence about fruit.
-
-	$grammar = match(
-			ql('I would like to buy'), 
-			some('a', qa('banana apple pear peach')
-	));
-
-	
-	if($grammar->('yes, we have no bananas today')) {
-		print "match\n";
-	} else {
-		print "no match\n";
-	}
-
-More complicated grammars can be handled by breaking up the grammar
-into subroutines which act as rules. Here's an example of a somewhat
-complex grammar using subroutines for subrules:
-
-
-	sub trekname { qa('Jim Captain Spock Bones Doctor Scotty') } 
-
-	sub occupation {a('ditch digger', 'bricklayer', 'mechanic')}
-	sub mccoy_job { [ql("I'm a doctor, not a"), occupation, a('!', '.')] }
-	sub mccoy_diag { [ "He's", 'dead', ',', trekname, a('!', '.') ] }
-	sub mccoy_rant1 { [ql('You green-blooded Vulcan'), a('!', '.') ] }
-
-	sub mccoy_isms { a(mccoy_job, mccoy_diag, mccoy_rant1) }
-
-	sub spock_awe {['Fascinating', ',', trekname, '.']}
-	sub spock_logic {['Highly', 'illogical',',', trekname, '.']}
-	sub spock_sensors { [ql("It's life ,"), trekname, ql(', but not as we know it .')]}
-
-	sub spock_isms {a(spock_awe, spock_logic, spock_sensors)}
-
-	sub kirk_dipolomacy1 {ql('We come in peace .')}
-	sub kirk_dipolomacy2 {ql('Shoot to kill .')}
-	sub kirk_to_scotty {ql('I need warp speed now, Scotty !')}
-	sub kirk_to_spock {ql('What is it , Spock ?')}
-	sub kirk_to_bones {ql('Just fix him , Bones')}
-	sub kirk_solution {ql('Activate ship self-destruct mechanism .')}
-
-	sub kirk_isms {a(
-		kirk_dipolomacy1, 
-		kirk_dipolomacy2,
-		kirk_to_scotty,
-		kirk_to_spock,
-		kirk_to_bones,
-		kirk_solution
-	)}
-
-	sub time_units {qa('minutes hours days weeks')}
-	sub scotty_phy101 {ql('Ya kenna change the laws of physics .')}
-	sub scotty_estimate {[ ql("I'll have it ready for you in three"), time_units, '.' ]}
-
-	sub scotty_isms { a(scotty_phy101, scotty_estimate) }
-
-	sub alien_isms {'weeboo'}
-
-	sub trek_isms {a(mccoy_isms, spock_isms, kirk_isms, scotty_isms, alien_isms )}
-
-	sub trek_screenplay {some(trek_isms)}
-
-	$grammar = parse(  trek_screenplay );
-
-
-Given the grammar in the above example, you could create some text 
-and see if it follows the trek screenplay format this way:
-
-
-	my $script = <<'SCRIPT';
-
-		What is it, Spock?
-		It's life, Jim, but not as we know it.
-		We come in peace.
-		weeboo
-		Shoot to kill.
-		weeboo
-		I need warp speed now, Scotty!
-		I'll have it ready for you in three minutes.
-		weeboo
-		I need warp speed now, Scotty!
-		Ya kenna change the laws of physics.
-		weeboo
-		weeboo
-		Shoot to kill.
-		Shoot to kill.
-		I'm a doctor, not a bricklayer.
-		Highly illogical, Doctor.
-		You green-blooded Vulcan.
-		Shoot to kill.
-		Shoot to kill.
-		He's dead, Jim.
-		Activate ship self-destruct mechanism.
-		Highly illogical, Captain.
-
-	SCRIPT
-	;
-
-
-	$grammar->( $script )
-
-And so on.
-
-See the pod for more information.
-
-	perldoc Parse::Gnaw
-
-
-BETA RELEASE
-
-Please note that this is a BETA RELEASE. 
-
-It is still a work in progress and the entire package is subject 
-to change at any time.
-
-When I believe I've got a package that does everything, 
-I'll make an production release, non-Beta release, of Parse::Gnaw 
-The rev number will probably be 1.0 or greater for a 
-production release.
-
-Until a production release is available, please do not
-use Parse::Gnaw to generate large massive complex grammars,
-only to have the nuts and bolts under the hood change on you later.
+Non linear parsing in text with many interconnections/dimensions
+becomes extremely computational intensive very quickly.
 
 
 INSTALLATION
@@ -203,7 +61,7 @@ perldoc command.
 
 You can also look for information at:
 
-    RT, CPAN's request tracker
+    RT, CPAN's request tracker (report bugs here)
         http://rt.cpan.org/NoAuth/Bugs.html?Dist=Parse-Gnaw
 
     AnnoCPAN, Annotated CPAN documentation
@@ -213,13 +71,46 @@ You can also look for information at:
         http://cpanratings.perl.org/d/Parse-Gnaw
 
     Search CPAN
-        http://search.cpan.org/dist/Parse-Gnaw
+        http://search.cpan.org/dist/Parse-Gnaw/
 
 
-COPYRIGHT AND LICENCE
+LICENSE AND COPYRIGHT
 
-Copyright (C) 2008 Greg London
+Copyright (C) 2013 Greg London
 
 This program is free software; you can redistribute it and/or modify it
-under the same terms as Perl itself.
+under the terms of the the Artistic License (2.0). You may obtain a
+copy of the full license at:
+
+L<http://www.perlfoundation.org/artistic_license_2_0>
+
+Any use, modification, and distribution of the Standard or Modified
+Versions is governed by this Artistic License. By using, modifying or
+distributing the Package, you accept this license. Do not use, modify,
+or distribute the Package, if you do not accept this license.
+
+If your Modified Version has been derived from a Modified Version made
+by someone other than you, you are nevertheless required to ensure that
+your Modified Version complies with the requirements of this license.
+
+This license does not grant you the right to use any trademark, service
+mark, tradename, or logo of the Copyright Holder.
+
+This license includes the non-exclusive, worldwide, free-of-charge
+patent license to make, have made, use, offer to sell, sell, import and
+otherwise transfer the Package with respect to any patent claims
+licensable by the Copyright Holder that are necessarily infringed by the
+Package. If you institute patent litigation (including a cross-claim or
+counterclaim) against any party alleging that the Package constitutes
+direct or contributory patent infringement, then this Artistic License
+to you shall terminate on the date that such litigation is filed.
+
+Disclaimer of Warranty: THE PACKAGE IS PROVIDED BY THE COPYRIGHT HOLDER
+AND CONTRIBUTORS "AS IS' AND WITHOUT ANY EXPRESS OR IMPLIED WARRANTIES.
+THE IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
+PURPOSE, OR NON-INFRINGEMENT ARE DISCLAIMED TO THE EXTENT PERMITTED BY
+YOUR LOCAL LAW. UNLESS REQUIRED BY LAW, NO COPYRIGHT HOLDER OR
+CONTRIBUTOR WILL BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, OR
+CONSEQUENTIAL DAMAGES ARISING IN ANY WAY OUT OF THE USE OF THE PACKAGE,
+EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 

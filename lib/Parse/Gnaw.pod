@@ -1,2076 +1,503 @@
+package Parse::Gnaw;
 
-
+use 5.006;
+use strict;
+use warnings FATAL => 'all';
 
 =head1 NAME
 
-Parse::Gnaw - An extensible parser. Define grammars using subroutine calls.
-Define your own grammar extensions by defining new subroutines. Parse text
-in memory or from/to files or other streams.
+Parse::Gnaw - Write extensible, recursive, grammars in 
+pure perl code (grammar rules are perl arrays) and apply them to 
+whatever parsee you want. 
+
+
+
 
 =head1 SYNOPSIS
 
-Gnaw is a perl module which implements full regular expressions and 
-full text parsing grammars using nothing but pure perl code limited 
-to subroutine closures and basic perl variables such as scalars, 
-hashes, arrays, and references.
+Write extensible, recursive, grammars using pure perl code.
+Grammar rules are perl arrays. Apply them to whatever parsee you want.
+Normal parsees would be strings. Interesting parsees might be a 
+three-dimensional array of characters.
 
-You write your grammar in pure perl. There is no intermediate 
-"parser language" that then gets interpreted into something executable.
-
-When you do a "use Parse::Gnaw", the Gnaw module will import a 
-number of functions directly into your namespace. Yes, this is 
-completely bad form for normal modules. But this is not a normal 
-module. The imported subroutines include regular expression and 
-parsing functions for matching, quantifiers, literals, 
-alternations, character classes, and so on. You build up your 
-grammar by calling these functions. The final call will return 
-a code reference. This code reference is your grammar.
-
-When you dereference that grammar, if it is a "match" function, 
-then you pass in the string you want to parse.
-
+	no strict 'vars';
 	use Parse::Gnaw;
+	use Parse::Gnaw::String;
 
-	# create the grammar
-	my $grammar = match('hello');
+	rule('SayHello', 'Hello', 'World');
+	my $string=Parse::Gnaw::String->New('So Hello World of mine');
+	$string->parse('SayHello');
 
-	# apply the grammar to a string
-	if($grammar->('hello world')) {
-		print "match\n";
-	} else {
-		print "no match";
-	}
+This is the second generation of Parse::Gnaw starting from revision 0.600.
+Gen1 stored rules as code references and that prevented recursive calls
+within a rule as calling the code ref for the rule would go into an 
+infinite loop. Gen2 uses array references to store rule, with the name
+of the array reference variable matching the name of the rule.
 
-You can also create the grammar and execute it in one step:
+	our $rulename = [ .... rule content .... ];
 
-	my $texttoparse = "howdy partner";
+It should allow recursive rules, although it will probably get hung
+in an infinite loop trying to match a left recursive rule.
 
-	if(match('hello', 'world')->($texttoparse)) {
-		print "match\n";
-	} else {
-		print "no match\n";
-	}
+=head2 Define a Grammar
 
-Note the above example translated into perls regular expression syntax 
-would look something like this:
+Before you can parse anything, you have to create a grammar.
+Grammars are created with the "rule" subroutine, which is imported 
+when you use Parse::Gnaw.
 
-	my $texttoparse = "howdy partner";
-
-	if($texttoparse =~ m{hello\s*world}) {
-		print "match\n";
-	} else {
-		print "no match\n";
-	}
-
-
-You can build up more complicated grammars fairly easily.
-This one looks for a sentence about fruits.
-
-	$grammar = match(ql('I would like to buy'), some('a', qa('banana apple pear peach')));
-
-The "match" function looks for a match to the grammar in the string being parsed.
-
-The "ql" function (quoted literal) allows you to put a sequence of 
-literals into a single string. It the splits the string up into 
-individual literals much like perls "qw" function does. Then it puts 
-them into a grammar sequence for you. This saves you from putting 
-quotes around each individual literal.
-
-The "some" function is a quantifier looking for "1 or more" of whatever it surrounds, 
-in this case, a sequence of the literal "a" followed by an alternation
-of different possible fruit.
-
-The "qa" function (quoted alternation) takes a single string and splits it 
-into individual words, also similar to perls "qw" function. The "qa" function
-then takes those individual words and creates an alternation that tries to 
-match any individual word in the string as a valid alternate.
-
-=head2 Extensible
-
-The grammars are defined by calling subroutines imported into your namespace 
-from Parse::Gnaw. You can define your own grammar components by declaring
-a subroutine that performs whatever preprocessing you want and generates
-whatever set of lower level components you want. Examples of this are
-provided later on in this pod file.
-
-=head2 BETA
-
-Please note that this is a beta release. This is more of a 
-proof of concept than something ready for production code 
-or for massive grammars. The interfaces may change completely 
-in the future. When the interfaces have settled, I will release 
-this as a version 1.0+ module. Until then, please do not use 
-this to develop some gigantic parser when the grammar may have 
-to completely change.
-
-=head1 EXPORT
-
-Currently, EVERYTHING is exported into the callers namespace. 
-Yes, I know, bad programmer. No biscuit. 
-
-The problem is I did not want grammars to be weighed down with 
-a bunch of package prefixes at every step.
-
-	my $grammar = Parse::Gnaw::match(Parse::Gnaw::a(Parse::Gnaw::l('hello'),Parse::Gnaw::l('howdy'));
-
-Gets rather tedious.
-
-Hopefully, no one will have collisions with subroutine names. 
-If they do, then it might make sense to create a new package, 
-declare the grammar in there, then simply pull out the code 
-reference and use that in the rest of your code.
-
-	package mynormalpackage;
-
-	our $grammar;
-
-	{
-		package mylocalpackage;
-
-		use Parse::Gnaw; # all subs imported into mylocalpackage
-
-		$mynormalpackage::grammar = match('hello', 'world');
-
-	}
-
-
-	$grammar->('howdy');
-
-Again, everything may change tomorrow as I sort this out.
-
-=head1 ok function
-
-In the examples provided, the "ok" function is used repeatedly.
-This allows the examples to be used directly in the Parse::Gnaw
-tests directly. The "ok" function is defined there by the 
-Test::More package. Here is a stub for the "ok" function so that
-you can use the examples independent of Test::More.
-
+	# see t/doc_ex_rule_hi.t
 	use Parse::Gnaw;
+	rule('SayHello', 'H', 'I');
 
-	sub ok {
-	 	my $boolean = shift(@_);
+This will create a package scalar in your current package. 
+The name of the scalar will be the name of the rule.
+The scalar will be a reference to an array that contains the rule.
+You can treat it like any other perl variable.
+
+	print Dumper $SayHello;
+
+This will print out something like:
+
+$VAR1 = [
+          [
+            'rule',
+            'rule1',
+            {
+              'methodname' => 'rule',
+              'filename' => 't/doc_ex_rule_hi.t',
+              'linenum' => 18,
+              'payload' => 'rule1',
+              'quantifier' => '',
+              'package' => 'main'
+            }
+          ],
+          [
+            'lit',
+            'H',
+            {
+              'methodname' => 'lit',
+              'filename' => 't/doc_ex_rule_hi.t',
+              'linenum' => 18,
+              'payload' => 'H',
+              'package' => 'main'
+            }
+          ],
+          [
+            'lit',
+            'I',
+            {
+              'methodname' => 'lit',
+              'filename' => 't/doc_ex_rule_hi.t',
+              'linenum' => 18,
+              'payload' => 'I',
+              'package' => 'main'
+            }
+          ]
+        ];
+
+
+The array shows three elements.
+The first is a "rule" which defines the name of the rule
+and also holds extra information about the rule.
+The next two elements are literals looking for 'H' and then 'I'.
+
+
+=head2 Create Something to be Parsed
+
+A grammar is half of the puzzle. You also need to create
+the thing you want to parse. A simple example is a string:
+
+	# see t/doc_ex_string_dog.t
+	use Parse::Gnaw::LinkedListDimensions1;
+	my $ab_string=Parse::Gnaw::LinkedListDimensions1->new("dog");
+	$ab_string->display();
+
+What this does is take the string 'dog' and turn it
+into a linked list that can be parsed.
+
+Because Data::Dumper() does not handle linked lists well
+(they do not display in an easy-to-read format),
+the display() method was created. It will output a 
+Parse::Gnaw string-ish object of some kind in a more readable format
+
+	Dumping LinkedList object
+	LETPKG => Parse::Gnaw::Blocks::Letter # package name of letter objects
+	CONNMIN1 => 0 # max number of connections, minus 1
+	HEADING_DIRECTION_INDEX => 0
+	HEADING_PREVNEXT_INDEX  => 0	
+	FIRSTSTART => 
+
+		letterobject: Parse::Gnaw::Blocks::Letter=ARRAY(0xa08c820)
+		payload: 'FIRSTSTART'
+		from: unknown
+		connections:
+			 [ ........... , ........... ]
 	
-		if($boolean) {
-			print "pass";
-		} else {
-			print "FAIL";
-		}
-		print " : ";
+	LASTSTART => 
 	
-		my $msg = shift(@_);
+		letterobject: Parse::Gnaw::Blocks::Letter=ARRAY(0xa18d70c)
+		payload: 'LASTSTART'
+		from: unknown
+		connections:
+			 [ ........... , ........... ]
 	
-		if(defined($msg)) {
-			chomp($msg);
-			print $msg;
-		}
+	CURRPTR => 
 	
-		print "\n";
-	}
+		letterobject: Parse::Gnaw::Blocks::Letter=ARRAY(0xa08c820)
+		payload: 'FIRSTSTART'
+		from: unknown
+		connections:
+			 [ ........... , ........... ]
+	
+	
+	letters, by order of next_start_position()
+	letterobject: Parse::Gnaw::Blocks::Letter=ARRAY(0xa252d2c)
+		payload: 'd'
+		from: file t/doc_ex_string_dog.t, line 22, column 0	
+		connections:
+			 [ ........... , (0xa252de0) ]
 
-	my $grammar; # declare it here so other examples can just use it.
 
-The above code is assumed to be contained in all the examples that follow.
+		letterobject: Parse::Gnaw::Blocks::Letter=ARRAY(0xa252de0)
+		payload: 'o'
+		from: file t/doc_ex_string_dog.t, line 22, column 1
+		connections:		
+			 [ (0xa252d2c) , (0xa252ef8) ]
 
-=head1 OVERVIEW
 
-So, again, when you do a
+		letterobject: Parse::Gnaw::Blocks::Letter=ARRAY(0xa252ef8)
+		payload: 'g'
+		from: file t/doc_ex_string_dog.t, line 22, column 2
+		connections:
+			 [ (0xa252de0) , ........... ]
+	
 
+		letterobject: Parse::Gnaw::Blocks::Letter=ARRAY(0xa18d70c)
+		payload: 'LASTSTART'
+		from: unknown
+		connections:
+			 [ ........... , ........... ]
+
+
+
+=head2 Apply the Grammar to the Grammee. 
+
+Now that you have a Grammar and a Grammee, you can parse.
+
+The parse() method is something that Parse::Gnaw::LinkedList type objects have available.
+It takes in one argument, a string containing the name of the top level rule or grammar
+that you want to apply to the string. If the rule matches the string, parse() will return
+true 1. If the rule does NOT match the string, parse() will return false ''.
+
+	$string->parse('rulename');
+
+The parse() method is used for parsing an an entire string from the beginning.
+It is similar to putting ^ or \A at the front of a regular expression:
+
+	m/^(rule)/ or m/\A(rule)/ 
+
+Here's a full example of parsing a string:
+
+	# see t/doc_ex_rule_and_string.t
 	use Parse::Gnaw;
+	use Parse::Gnaw::LinkedListDimensions1;
 
-in your code, a number of subroutines are imported into your namespace.
-You can then call these subroutines to build up a grammar. The grammar
-is held in the form of a code reference. You then dereference the coderef
-to call the parser and provide it with the string you want to parse.
-The dereferenced code reference that is the parser will return a boolean
-to indicate whether a match was found or not.
+	# A Simple Rule Example
+	rule( 'rule1', 'H', 'I' );
 
-	$grammar = match('hello', 'world');
-	
-	ok($grammar->('hello world')==1), "match");
-	ok($grammar->('howdy world')==0), "NO match");
+	# A simple string example
+	my $histring=Parse::Gnaw::LinkedListDimensions1->new("HI THERE");
 
-	> pass : match
-	> pass : NO match
+	ok($histring->parse('rule1'), "This is like regex   'HI THERE' =~ m/HI/ ");
 
-If you want your grammar to match a literal string, simply pass that string
-into the "parse" or "match" function. Strings passed into the Gnaw
-functions are interpreted to mean that they are literals to look for in the
-text being parsed.
 
-=head2 Top Level and Low Level Functions
 
-The Gnaw module provides a number of "top level" functions to create  your 
-grammars. These top level functions return code references which are your
-grammar. You then dereference these code references to call the grammar
-and pass in the string you want to parse.
 
-Only top level functions return grammar code references. They include
-"match", "swap", "parse", and "modify". These functions return code 
-references that are the grammar, code references
-you dereference to run the grammar on a string.
 
-Low level functions return code references that are called "stitchers". 
-These are low level subroutines used by Parse::Gnaw to build up the grammar. 
-Most of the low level and high level Gnaw functions know how to handle stitchers.
-A "stitcher" is not a grammar, and if you try to dereference a 
-coderef from a low level function, your script will die with strange errors.
+=head2 rule
 
-	my $stitcher = a('hello', 'howdy');
-	
-	# WRONG! Don't do it!
-	$stitcher->("these are not the droids you are looking for");  
+The rule function is used to create rules. Rules are created as package scalar 
+in caller's namespace. The name of the scalar is the name of the rule.
 
-Always make sure you use a top level function as your final function 
-of your grammar.
+	package main;
+	rule( 'rule1', 'H', 'I' );
 
+The above example will create a rule called "main::rule1". 
+You can call Data::Dumper on $rule1 and see that it is an array reference.
 
-=head1 TOP LEVEL FUNCTIONS
+Rules by themselves don't match anything in a string or block of text.
+Rules are just a way to handle a grammar in managable chunks.
+They could be thought of as similar to a perl subroutine, a container
+for the code that does something.
 
-=head2 match
+The first parameter is a string with the name of the rule.
 
-The "match" function is similar to perls =~ m/// regexp function.
+Everything after that defines what the rule does.
+These can be string literals or character classes or alternations
+or quantifiers, and so on. Another thing you can do inside a rule
+is call another rule.
 
-Since "m" is a reserved perl function, we had to use a different name.
 
-The "match" function will find the first match of the grammar in the string.
-It will start at the first character in the string, attempt to find a match
-from there, and if it fails to find a match, it will move forward one character
-and attempt to find a match there. If no match is found, it will move forward
-one character and try the pattern, repeating until it reaches the end of the
-string.
+=cut
 
-match examples:
+=head2 call
 
-	my $grammar = match('hello', 'world');
-	ok($grammar->("these are not the droids you are looking for")==0, 'no match');
-	ok($grammar->("why did you say hello world just now?")==1, 'match found');
-	
+Use the 'call;' subroutine to have one rule call another rule.
 
-=head2 swap
+	rule( 'rule1', 'a', 'b');
+	rule( 'rule2', 'c', call('rule1') );
 
-The "swap" function is similar to perls =~ s/// regexp function.
+Note: if you call a rule that doesn't exist, script will throw a warning.
+You can pre-declare a rule with the predeclare() function:
 
-Since "s" is a reserved perl function, we had to use a different name.
+	predeclare('rule1');
+	rule( 'rule2', 'c', call('rule1') );
+	rule( 'rule1', 'a', 'b');
 
-The "swap" function allows you to define a pattern to look for in the 
-string and allows you to define some replacement text if a match is found.
-The replacement text can be defined as a literal string or as a callback.
 
-The last parameter in the "swap" function is either a string or a subroutine reference.
-This last parameter will be used as the replacement value. All other parameters
-are low level functions to define the pattern.
+=cut
 
-If you want to swap "Alice" for "Bob", then just do this:
 
-	swap('Alice', 'Bob')
+=head2 	predeclare
 
-A working example might look like this:
+When declaring rule1 that calls rule2, and you haven't yet declared rule2, 
+you will get a warning message about the rule not existing.
+To avoid that warning, use predeclare() and pass in the name of the
+rule you want to predeclare.
 
-	my $input = "hello Alice ! How are you?";
+=cut
 
-	# find 'Alice' and replace with 'Bob', use string literal
-	ok(swap('Alice', 'Bob') -> ($input)==1, "checking match was found");
 
-	ok($input eq 'hello Bob ! How are you?', "checking substitution/swap took place");
 
+=head2 	lit
 
-If the last parameter to the "swap" funciton is a subroutine reference, then if 
-a match is found, then the parser will call the subroutine, pass the matching value
-into the subroutine as the first parameter, and whatever that subroutine returns
-is the replacement text the parser will use.
+Pass this function a string containing the literal value you want to match.
 
-You could return a hardcoded value:
+	rule( 'greeting', lit('hello') );
 
-	swap('Alice', sub{'Bob'})
-	
-You could take the matching value, and modify it:
+Any string passed into rule() will be assumed to be a lit().
 
-	swap('Alice', sub{uc(shift(@_))})
+	rule( 'greeting', 'hello' );
 
-A working example might look like this:
+=cut
 
-	my $input = 'Hello Alice';
-	ok(swap('Alice', sub{uc(shift(@_))})->($input)==1, "match found");
-	ok($input eq 'Hello ALICE', "text swap occurred");
 
-Here's another swap example:
+=head2 cc
 
-	# example 2
-	my $input = "please call 555-1212 for more details";
+Call this and pass in a string defining a character class.
 
-	# find a phone number and replace with phone number surrounded by asterisks. Use subroutine.
-	swap(some(dgt),'-',some(dgt), sub{return "***".shift(@_)."***";}) -> ($input);
-	ok($input eq 'please call ***555-1212*** for more details');
+	cc('aeiou');
 
-=head2 modify
+This is like [aeiou] in perl regular expressions.
 
-The "modify" function operates similar to the "match" function in that it starts
-at the beginning of the text, tries to find a pattern match, and moves forward
-through the text until it finds a match.
+=cut
 
-The difference between "modify" and "match" is that "modify" allows the "get" 
-function to modify the text in flight. If the "get" function returns anything
-other than undef, the original text will be modified to whatever the "get"
-function return value is. 
+=head2 notcc
 
-Think of "modify" as "match" but with the "write protect" bit turned off. And think
-of "get" as the way to "write" new text.
+Call this and pass in a string defining an inverted character class.
 
-=head2 parse
+	notcc('aeiou');
 
-The "parse" function is similar to perls  =~ m/\A ... / regular expression function.
-The "parse" function only attempts to match the pattern starting at the beginning of
-the text. It does not move forward through the string to find a match. 
+This is like [^aeiou] in perl regular expressions.
 
-	$grammar = parse('Alice');
+=cut
 
-	ok($grammar->('Alice Bob Charlie')==1, "match found");
-	ok($grammar->('Bob Alice Charlie')==0, "match not found");
 
+=head2 thrifty
 
-If you're defining a grammar to parse a file or some formal language, 
-you probably want to use "parse" instead of "match".
+Quantifier. Pass in a series of subrules to thrifty and it will
+attempt to match that series as defined by the last entry in the 
+elements passed into the function call.
 
-=head2 az 
+A perl regular expression
+	/(abc)+/
+becomes
+	thrifty('a', 'b', 'c', '+');
 
-The "az" function requires the text being parsed match the pattern 
-from beginning to end. 
+All arguments but the last one are essentially put in parenthesis and 
+associated with the quantity specifier
+i.e.
+	/(abc)+/
+becomes
+	thrifty('a','b','c','+')
 
-	az( blah )   ==>  =~ m/\A blah \Z/
+Note the only quantifier mode supported is thrifty.
+Parse::Gnaw does not support greedy quantifiers.
 
-=head1 LOW LEVEL FUNCTIONS
+Here is a list of ways you can define the last element passed into thrifty:
 
-=head2 Literals
+thrifty( ... , [3,9] 	);	3 to 9
+thrifty( ... , [3,] 	);	3 or more
+thrifty( ... , [,9] 	);	0 to 9
+thrifty( ... , '3,9'	);	3 to 9
+thrifty( ... , '3,'	);	3 or more
+thrifty( ... , ',9'	);	0 to 9
+thrifty( ... , '+'	);	1 or more
+thrifty( ... , '*'	);	0 or more
+thrifty( ... , '?'	);	0 or 1
 
-Most of the Parse::Gnaw subroutines will recognize strings passed in as
-parameters as string literals to become part of the grammar. We already
-saw this in the above example:
+The thrifty function return value can be placed in a rule declaration.
 
-	$grammar = match('hello', 'world');
+=cut
 
-This example will create a grammar that looks for the literal 'hello'
-followed by the literal 'world'.
 
-Actually, the grammar will look for the literal 'hello', it will then
-Skip over any text that the Skip function tells it to Skip (by default,
-it will skip over any whitespace), and then look for the literal 'world'.
 
-See the "Skip" function for more information.
 
-Strings passed into Parse::Gnaw functions are perl strings, meaning
-that they follow the normal perl rules for string evaluation.
-i.e. Single quotes do NOT get evaluated. Double quotes do.
 
-If you want to match a tab character, then be sure to use "\t" 
-instead of '\t'.
 
-=head2 List Context
+=head2 process_first_arguments_and_return_hash_ref
 
-Before we go too far into talking about Gnaw, we need to address a meta issue
-around Parse::Gnaw. 
+Internal subroutine.
 
-The thing to keep in mind is that all Parse::Gnaw subroutines are... 
+This processes the various ways to call the rule() function
+and fills in the pieces the caller doesn't pass in.
+Should always return a hash reference will all info filled in.
 
-... perl subroutines. 
+=cut
 
-This means that they are susceptible to list context issues that occur 
-in perl when you call the functions, and that they are susceptible to 
-list context issues and return mechanism issues when you declare your 
-own subroutines to wrap up a subrule of your grammar.
 
-When you call any perl subroutine, the parameters passed in are flattend
-into one gigantic list by the list context mechanism in perl.
+=head2 fragment_a_rule
 
-	# all parameters are flattened. subroutine receives 6 parameters.
-	my_perl_sub( (1,2,3),('a', 'b', 'c') ); 
+Internal subroutine. Used to break up a rule into pieces so that a 
+quantifier can operate correctly.
 
-When the my_perl_sub subroutine is called, perl takes all the parameters
-and flattens them into a single list context. This means in the above 
-example that my_perl_sub receives 6 parameters:
+the rest of the code in this subroutine is to "reorder" the grammar. 
+for example, this grammar:
+rule1 : 'a' rule2 'b'
+rule2 : 'c' thrifty('d') 'e'
+needs to rearrange the thrifty so that it can try to match a number of 'd'
+then it has to match 'e', then it has to match 'b' from the previous rule.
+if the thrifty quantifier fails, it has to try to match another 'd',
+then match 'e', then match 'b' from the previous rule.
 
-	1, 2, 3, 'a', 'b', 'c'
+This can't be done treating each rule as a subroutine/function as they appear
+because a quantifier can't return after it's matched 'd'.
+it has to match 'd', then match anything in the grammar anywhere in
+the grammar that occurs after it, and THEN it can return.
 
-This also means that my_perl_sub has no idea that the numbers had been
-grouped together in one set of parens and the letters had been grouped 
-together in another set of parens. The my_perl_sub subroutine sees 
-nothing but a flat list of parameters being passed in.
+The way we're going to do this is by fragmenting/chopping up the rules
+any time we have a CALL or QUANTIFIER (quantifiers are actually calls)
+we are going to take everything AFTER THE CALL, and put it in its own 
+rule fragment.
+the original call gets modified with a thencall=>rulefragment added to it.
+ 
+for example: 
+rule1 : 'a' call('rule2') 'c' qty(thrifty1) 'e'
+rule2 : 'b'
+thrifty1 : 'd'
 
-If you want to call a subroutine and have it treat parameters in groups,
-then the most common way to do that is to group the parameters you want
-grouped by putting them into arrays and passing references to those arrays.
+we need to fragment rule1
+rule1 : 'a' call('rule2') 'c' qty(thrifty1) 'e'
 
-	# my_perl_sub receives two parameters, two array references.
-	my_perl_sub( [1,2,3] , ['a', 'b', 'c'] ); 
+It can be viewed as getting fragmented as follows:
+rule1 : 'a' call('rule2') [ 'c' qty(thrifty1) ['e']]
+                          ^frag1              ^frag2
 
-This exact same list context mechanism affects Parse::Gnaw. And the solution
-within Parse::Gnaw is the same as for general perl: wrap groups of items
-in anonymous arrays.
+therfore it becomes
+rule1 : 'a' call('rule2',thencall=>rule1frag1)
+rule1frag1 : 'c' call('thrifty1', thencall=>rule1frag2) 
+rule1frag2 : 'e'
 
-Example. You want a grammar with two possible alternates. The first alternate 
-is "hello" followed by "world". The second alternate is "howdy" followed by
-"planet". If you try to put them into the alternate function (the "a" function),
-you might try this:
+this will allow all calls and quantifiers to treat the rest of the
+grammar after the call/quantifier as if it were part of a nested function call.
+The "thrifty" call doesn't return until it matches all the way
+to the end of the grammar, therefore, everything after the thrifty
+call needs to be treated as part of the thrifty function call.
+ 
+in the above example, when we call rule 'thrifty1', we also pass in
+the fact that the rule after that is 'rule1frag2'
+this means 'thrifty1' can match 1 'd', and then call rule1frag2 to 
+see if the rest of the grammar matches.
+if it fails, we can trap the failure in the 'thrifty1' call, and 	
+then we can try to match another 'd', and then try calling rule1frag2
+again to see if the rest of the rule matches THAT.
+=cut
 
-	$grammar = match( a( 
-			"hello", "world",
-			"howdy", "planet"
-	));
 
-The problem is that the "a" function has no way of knowing how it is supposed
-to group the parameters. Instead, the above example will look for four possible
-alternates:
 
-	"hello"
-	or
-	"world"
-	or
-	"howdy"
-	or
-	"planet"
+=head2 	copy_location_info_and_make_new_hash_ref
 
-The solution is to group the parameters with an anonymous array reference.
-The above example can be rewritten as follows:
+Internal subroutine.
 
-	$grammar = match( a( ["hello", "world"],["howdy", "planet"]	));
+given a hash created by process_first_arguments_and_return_hash_ref(), 
+extract all location information and copy it to a newly created hash.
 
-This will look for two possible alternates:
+=cut 
 
-	"hello" "world"
-	or
-	"howdy" "planet"
 
-Most of the Parse::Gnaw functions (such as the "a" (alternate) function) are 
-smart enough to recognize array references and treat them as a series of 
-grammar components meant to be addressed as a single unit.
+=head2 	eval_string
 
-=head2 declare subroutines for your own sub-rules
+Internal subroutine.
 
-The other issue around perl list context and Parse::Gnaw occurs around
-perl and its "return" function in subroutines. In Parse::Gnaw, if you have
-a complex grammar, you can break it up into rules which take the form
-of perl subroutines you declare. The subroutine is some subset of the
-whole grammar, and must return something that the rest of the grammar
-can use.
+Pass in a string. Will call eval("") on it. 
+If you want the eval to return a value, assign it to a special variable $eval_return.
+The value of $eval_return will be returned by eval_string() function.
 
-This means you must be aware of perls "return" functionality when declaring
-subroutines as your rules.
+=cut
 
-For example, you can declare the following subroutine in any perl code:
+=head2 	fragment_suffix
 
-	sub mysub { 'hello', 'there' };
+Internal subroutine. returns a string that will be used to fragment any rules.
 
-When you call a perl subroutine, it will return whatever was the last
-expression evaluated. And in the above example, "there" is the last 
-expression evaluated, and "there" is what mysub will return.
+When a rule is fragmented, the fragments are named 
 
-	my $retval = tester;
-	print "retval is '$retval'\n";
+	originalrule.fragment_suffix().integer_counter
 
-	> retval is 'there'
+Call this subroutine to return the string value for fragment_suffix().
 
-Again this is an issue relating to perls list context. If you want a subroutine
-to return a list of items, then enclose them in parenthesis to force 
-list context on the return value.
 
-	sub fruit { ('apple', 'banana', 'pear') } # parens force list context
+=cut 
 
-You could then call this subroutine and pass it to the Parse::Gnaw "a" function
-as a list of possible alternates.
 
-	$grammar = match(a( fruit ));
 
-However, if you want to declare a subroutine which is intended to contain
-a sequence of items, then you will want to wrap them in an anonymous array
-so that a single array reference is returned and is treated as a sequence
-by the rest of the grammar.
+=head2 	get_ref_to_rulebook
 
-	# square brackets groups return value
-	sub greetworld { ['hello', 'world'] }	
-	sub greetplanet{ ['howdy', 'planet'] }
+Internal subroutine. Used to get a reference to the rulebook in the caller's package.
 
-	$grammar = match(a( greetworld, greetplanet ));
+All rules for a package are placed into a package variable called (packagename)::rulebook.
 
-Note that the two subroutines define a sequence of literals that get
-passed into the "a" function. To keep the "a" function from flattening
-the return value of the two subroutines, the subroutines need to group
-their sequences into array references.
+This variable is a hash reference where the keys are the names of the rules and
+the data is an array reference for each rule.
 
-Always keep in mind that Parse::Gnaw functions are perl functions and
-are susceptible to list context issues relating to the things being
-passed into a function as well as what is returned by the function.
+=cut
 
-As a general rule, when declaring subroutines to describe pieces of your
-grammar, if that subroutine contains more than one grammar component,
-you should wrap the return value in parenthesis if you intend to use
-the components in list context (a list of different alternates to pass in
-to "a"), or you should wrap the return value in square brackets if you
-intend to use the components as one sequence of components.
+=head2 	get_ref_to_rulename
 
-If the subroutine contains ONLY one Parse::Gnaw grammar component, then
-you do not have to wrap that component in parens or square brackets.
-Parse::Gnaw low level functions always return one scalar, a stitcher
-code reference that can be used by other Parse::Gnaw functions.
+Internal subroutine. Used to get a reference to a specific rulename in the caller's package.
 
-Since Parse::Gnaw grammar functions always return one scalar, you do not
-have to worry about forcing scalar context with square brackets. Just
-call the Gnaw function and perl will return the stitcher for you.
+Each rule generated for a package is placed into the package as a scalar containing an array reference.
 
-	# return value of 'a' function is a scalar, 
-	# (a scalar containing a code ref that is a stitcher function)
-	# therefore, subroutine "fruit" doesn't have to put 
-	# the "a" function in square brackets to force scalar context on
-	# return value.
-	sub fruit { a('apple', 'banana', 'pear') }
+The array reference contains the rule information needed to parse a string.
 
-=head2 summary of return values in subroutines/subrules 
+=cut
 
-Always using parens or square brackets in your subroutines will 
-show how you intend the subroutine to be used in a larger grammar.
+=head2 format_package
 
-	# parens forces return in list context. items may be used in parallel
-	sub fruit { ('apple', 'pear', 'banana') } 
+Internal subroutine. Formats the package name into consistent string.
 
-	# square brackets forces return in scalar context. items are seqential.
-	sub greeting { ['may', 'the', 'force', 'be', 'with', 'you'] }
+=cut 
 
-Do not use a wrapper (no parens, no square brackets) if subroutine 
-only calls a single Gnaw grammar component. 
+=head2 format_filename
 
-	# 'name' subroutine only calls one function 'a'. don't have to wrap.
-	sub name { a('Alice', 'Bob', 'Charlie') }
+Internal subroutine. Formats the filename into a consistent string.
 
-Now back to the grammar functions.
+=cut
 
-=head2 cc (character classes)
 
-The Parse::Gnaw "cc" function is used to declare a character class.
-The input to the "cc" function is a single string which lists all the
-characters that are to be part of the character class. The class will
-match any single character that is listed in the string.
+=head2 format_linenum
 
-	$grammar = match( cc('0123456789') ); # any single digit. 0,1,2,3,4,5,6,7,8,9
+Internal subroutine. Formats the line number into a consistent string.
 
-The "cc" function recognizes the '-' character as a meta character which
-operates the same as the '-' in perl character classes, creating a character
-class with all the characters between the two characters (inclusive) 
-separated by the '-' character.
+=cut
 
-	$grammar = match( cc('0-9') ); # any single digit. 0,1,2,3,4,5,6,7,8,9
 
-If you want the '-' character to be part of your character class, make it 
-the first character in the string.
-
-	$grammar = match( cc('-aeiou') ); # a hyphen or any vowel
-
-Character class shortcuts are provided for common character classes.
-
-	dgt => 0-9
-	wrd => a-zA-Z0-9_
-	spc => \n \t \r \f or literal space
-
-	$grammar = match( dgt ); # any single digit. 0,1,2,3,4,5,6,7,8,9
-
-Note that the "cc" function and its related shortcuts are one of the functions
-in Parse::Gnaw that do NOT handle array references, nor do they handle multiple
-strings being passed into them in list context. The only valid parameter to
-pass to the "cc" function is a single string containing all the characters 
-that you want in the character class.
-
-The cc shortcuts take no parameters at all.
-
-=head2 CC (inverted character class)
-
-The Parse::Gnaw "CC" function is an inverted character class. The input is a
-single string which defines the characters that you do NOT want to be part of
-the character class. Note that the "CC" function is uppercase and the "cc" 
-function is lower case.
-
-	$grammar = match( CC('0-9') ); # any single character EXCEPT a digit
-
-Short cuts are provided for common inverted character classes:
-
-	DGT => anything BUT 0-9
-	WRD => anything BUT a-zA-Z0-9_
-	SPC => anything BUT \n \t \r \f or literal space
-
-	$grammar = match( DGT ); # any single character EXCEPT a digit
-
-Note that the "CC" function has the same parameter restrictions as "cc".
-Only one string containing the characters defining the NOT character class.
-No more than a single parameter. No array references. The shortcuts take
-no parameters at all.
-
-=head2 thing
-
-The Parse::Gnaw "thing" function is a special character class that 
-matches any single character. It is equivalent to the perl
-regular expression '.' character. But perl does not allow '.' to be
-the name of a subroutine, so I called it "thing". Part of the reason 
-for this name was because of how it works well with quantifier 
-shortcuts of "any" and "some", described below.
-
-The "thing" function takes no parameters.
-
-	$grammar=match('b', thing, 'b');
-
-	ok($grammar->('bob')==1, "bob matches");
-	ok($grammar->('bb')==0, "bb does not match");
-
-=head2 a (alternation)
-
-The "a" function is an alternation function. It interprets each
-of its parameters to be one of several possible alternates.
-
-The following will look for one of any possible fruit in your text.
-
-	$grammar=match(a('apple', 'banana', 'pear', 'peach'));
-
-	ok($grammar->("she is the apple of my eye")==1, "found apple");
-
-=head2 qa (quoted alternation)
-
-Because listing a bunch of alternate literals is fairly common,
-the "qa" function allows you to do that with fewer quotation marks.
-The "qa" function takes a single string, breaks it up into individual
-literals based on whitespace, and then treats each literal as an
-alternate in the grammar.
-
-The above example could be shortened to this:
-
-	$grammar = match(qa('apple banana pear peach'));
-
-	ok($grammar->("she is the apple of my eye")==1, "found apple");
-	
-Grouping of a sequence of components into one alternate is done
-by putting the sequence in an array reference, see "list context"
-issues described above for a more detailed explanation of why this
-is.
-
-The following example looks for two possible alternates. The first
-alternate is the literal 'hello' followed by the literal 'world'.
-The second alternate is the literal 'howdy' followed by 'partner'.
-
-	$grammar = match(a( ['hello', 'world'], ['howdy', 'partner'] ));
-	ok($grammar->("why howdy partner !")==1, "found alternate");
-
-The alternates can be any sequence of grammar components wrapped in 
-an array reference.
-
-=head2 greedy and thrifty quantifiers
-
-The "greedy" and "thrifty" functions are quantifier functions. They allow you 
-to define a grammar that looks for some pattern that repeats for
-some number of times.
-
-The format for a quantifier call looks like this:
-
-	greedy ( [min, max(?)], grammar component(, component)* )
-
-The first parameter to the "greedy" or "thrifty" function is an array reference.
-This contains the parameters that control how the quantifier works.
-The "min" value determines the minimum number of times the pattern
-must match before considered a pass. The "max" value is optional. If 
-max is not defined, it is assumed to be infinite, and the parser will 
-attempt to fit as many patterns into memory as can fit.
-
-The remaining one or more parameters define the pattern to which 
-the quantifier will be applied. If more than one are supplied, 
-they will be applied as one large sequence.
-
-The difference between "greedy" and "thrifty" is how quickly the quantifier
-will try to match. The "greedy" function is greedy and will try to match
-as many patterns as possible. If it fails to match, the greedy 
-quantifier will start backing off pattern counts and try to let the
-rest of the grammar find a match.
-
-The "thrifty" function is thrifty and will try to match as few patterns
-as possible. If the rest of the grammar fails to match, the 
-thrifty pattern will try to match another pattern, before trying
-the rest of the grammar.
-
-	# seventeen or more 'g' or 'a' or 't' or 'c' characters.
-	$grammar = match( greedy([17], cc('gatc')) ); 
-
-	# one or more "word" characters
-	$grammar = match( greedy([1], wrd) );
-
-	# zero or more "digit" characters
-	$grammar = match( greedy([0], dgt) );
-
-	# at least 3 and up to 8 letters
-	$grammar = match( greedy([3,8], cc('a-zA-Z')));
-
-Note that the "greedy" and "thrifty" quantifiers are functions that can accept
-one or more parameters passed into them. These parameters can be
-other grammar components, string literals, or array references
-for grouped bits of grammar.
-
-	# one or more 'hello' followed by 'world'
-	$grammar = match( greedy([1], 'hello', 'world') )
-
-Shorcuts are provided for thrifty([0],...) and thrifty([1], ...), called 
-"any" and "some" respectively
-
-=head2 any function
-
-=head2 some function
-
-Because thrifty quantifiers of "zero or more" and "one or more" are fairly 
-common, shortcuts 'any' and 'some' have been provided.
-
-	$grammar = match( any(dgt) ); # zero or more (thrifty) digits
-
-	$grammar = match( some(wrd) ); # one or more (thrifty) word characters.
-
-The "any" and "some" functions take any number of input parameters,
-and the parameters can be string literals, array references, and other
-grammar components.
-
-	# one or more of "hello" followed by "world"
-	$grammar = match( some('hello', 'world') );
-
-If you have trouble reading that just insert "some number of" for "some".
-And insert "any number of" for "any".
-
-=head2 anything function
-
-=head2 something function
-
-The character set "thing" matches any single character. The "any" and "some" 
-functions are quantifiers of zero or more and one or more. These two functions
-are commonly combined, therefore a shortcut has been provided:
-
-	anything  => g([0], thing)
-	something => g([1], thing)
-
-You can use these in your grammars to make them slightly more readable.
-
-	# literal 'hello' followed by 1 or more characters, followed by
-	# literal 'how', literal 'are', and literal 'you'
-	$grammar = match( 'hello', something, 'how', 'are', 'you' );
-
-=head2 maybe function
-
-The maybe function is a shortcut that wraps the "greedy" function with the
-quantity hardcoded to [0,1]. This means whatever you put into the 
-"maybe" function is optional. It may be there or it may not and the
-parse will still pass.
-
-	$grammar = match('why', maybe('hello','there'), 'Alice');
-	ok($grammar->("why hello there Alice") == 1, 'match');
-	ok($grammar->("why Alice") == 1, 'match');
-	ok($grammar->("why hello Alice") == 0, 'no match');
-	ok($grammar->("why there Alice") == 0, 'no match');
-
-=head2 slist (separated list)
-
-Say you have a list of separated items, such as:
-
-	red, orange, yellow, green, blue, indigo, violet
-
-You might first try coding it up as:
-
-
-	sub color {qa("red orange yellow green blue indigo violet")}
-	sub comma {','}
-	$grammar=match(some(color, comma));
-
-The problem is this will require that the last color be followed by a comma:
-
-	red, green, blue,
-
-Many formally defined languages have comma separated lists, but do not allow
-a comma to follow the last item.
-
-The "slist" function allows you to define an item and a separator,
-and the resulting parser will look for items separated by separators, but
-will not look for a trailing separator after the last item. The general 
-format looks like this:
-
-	slist( item, separator )
-
-The "slist" function then returns a grammar component
-that will look for any of the following patterns.
-
-	item
-	item separator item
-	item separator item separator item
-	item (separator item)*
-
-If item is more than one grammar component, enclose it in square brackets
-to group it into an array reference. If the separator is more than one
-component, enclose it in square brackets to group it into an array reference.
-
-This example defines the item to be the word "color" followed by a color word.
-The separator is still a comma.
-
-	slist( [ 'color' qa('red green blue') ], ',' )
-
-The above example will match this text:
-
-	color red, color green, color blue
-
-If you allow a trailing comma, set the third parameter to a "1". 
-
-	slist( [ 'color' qa('red green blue') ], ',', 1 )
-
-The above example will match this text:
-
-	color red, color green, color blue,   # with or without that last comma
-
-If you allows empty items, enclose the item in a "maybe" function.
-Note that in this condition, the third parameter becomes irrelevant.
-
-	slist( maybe('color' qa('red green blue')), ',')
-
-
-=head2 get
-
-The "get" function is used to capture the text that matches a specific portion
-of the grammar and pass it into a user defined subroutine.
-
-The first parameter of the "get" function can be one of several possible things. 
-
-(1) a scalar reference
-
-(2) an array reference
-
-(3) a subroutine reference. 
-
-If the first parameter is a (1) scalar reference, the scalar will be used 
-to hold whatever matched the "get" function.
-
-	my $name;
-
-	$grammar = match('hello', get(\$name, some(wrd)), '!' );
-
-	$grammar->('hello Alice !');
-
-	print "name is '$name'\n";
-
-	> name is 'Alice'
-
-If your grammar gets more than one match while it parses,
-the scalar reference only holds the last match. If you use the
-same grammar to parse different strings, scalars are initialized
-to whatever value they held when the grammar was generated, and
-this value is overwritten only if a match occurs.
-
-	my $name;
-
-	$grammar = match('hello', get(\$name, some(wrd)), '!' );
-	$grammar->('hello Alice !');
-	$grammar->('hello Bob !');
-	$grammar->('hello Charlie !');
-
-	print "name is '$name'\n";
-
-	> name is 'Charlie'
-
-If the first parameter is (2) an array reference, then every match
-by the "get" function will get pushed into the array. If you call
-the same grammar multiple times, the array is emptied at the start
-of parsing. Note this behaviour is different from scalars.
-
-	my @name;
-
-	$grammar = match(some('hello', get(\@name, some(wrd)), '!') );
-	$grammar->('hello Alice ! hello Bob ! hello Charlie !');
-
-	print "name is ". Dumper \@name;
-
-	> name is $VAR1 = [
-	>	'Alice',
-	> 	'Bob',
-	> 	'Charlie'
-	> ];
-
-If the first parameter is (3) a subroutine reference, the parser will
-call this subroutine on every match and pass in as the first parameter
-the value of the string that matched. You may then do whatever you
-wish with this string inside the subroutine you define.	
-
-	my $name = sub{
-		my ($string) = @_;
-		# write $string to a file, or whatever
-		print "called subroutine, received '$string'\n";
-		return;
-	};
-
-	$grammar = match('hello', get($name, some(wrd)), '!' );
-
-	$grammar->('hello Alice !');
-
-	> called subroutine, received 'Alice'
-
-NOTE: When you use a subroutine reference with "get", you should always
-finish the subroutine with a "return;" statement. If you're subroutine
-returns anything other than undef, (and it will if the last expression
-is anything other than undef), then Parse::Gnaw will treat that return
-value as a replacement string and substitute that string in place of the
-string captured by "get".
-
-See the "get with modify" section.
-
-The remaining parameters of the "get" function are one or more 
-grammar components. Literals, character classes, alternations, 
-quantifiers, array refs used for grouping sequences of grammar
-components, etc.
-
-The "get" function can be nested, like nested capturing parens
-in perl regular expressions.
-
-	my ($g1, $g2, $g3, $g4, $g5, $g6, $g7, $g8);
-
-	$grammar = parse( 
-		get(\$g8,
-			get(\$g1, get(\$g2, thing), get(\$g3, thing) ),
-			get(\$g4, get(\$g5, thing), get(\$g6, thing), get(\$g7, thing) ),
-		) 
-	
-	);
-
-	$grammar->('abcdefghijklmnop');
-	
-	ok($g2 eq 'a', "g2");
-	ok($g3 eq 'b', "g3");
-	ok($g1 eq 'ab', "g1");
-	ok($g5 eq 'c', "g5");
-	ok($g6 eq 'd', "g6");
-	ok($g7 eq 'e', "g7");
-	ok($g4 eq 'cde', "g4");
-	ok($g8 eq 'abcde', "g8");
-	
-
-=head2 c (capture)
-
-For short grammars or regular expressions, the "get" function might be
-a bit of needless overhead. For those who want to save a bit of typing, 
-the "c" function is available.
-
-The "c" function is somewhat like "capture parens" in perl regular 
-expressions in that it captures whatever that matches inside the
-parens and puts it into a numbered variable. The "c" function uses
-numbered variables that look like this:
-
-	$c1 $c2 $c3 and so on.
-
-You can have up to 99 capture variables. The variables are declared
-and imported into your namespace when you use the Parse::Gnaw package.
-
-An exmaple using the C function might look like th"Hello Alice, how are you?"is:
-
-	$grammar = parse( 
-		c( 
-			c( c(thing),c(thing) ),
-			c( c(thing), c(thing), c(thing) ),
-		) 	
-	);
-
-	$grammar->('abcdefghijklmnop');
-
-	ok($c1 eq 'abcde', 	"checking c1 ");
-	ok($c2 eq 'ab',    	"checking c2 ");
-	ok($c3 eq 'a', 		"checking c3 ");
-	ok($c4 eq 'b', 		"checking c4 ");
-	ok($c5 eq 'cde', 	"checking c5 ");
-	ok($c6 eq 'c', 		"checking c6 ");
-	ok($c7 eq 'd', 		"checking c7 ");
-	ok($c8 eq 'e', 		"checking c8 ");
-	
-
-One significant difference between "c" numbered variables and 
-perl regular expression capture parens is that the "c" function
-puts the captured results into the numbered variable that 
-corresponds to the number of left parens that actually match
-the particular string being parsed.
-
-This shows up when your grammar uses the "a" (alternation) function.
-In the below example, we have a grammar that uses an alternation to
-look for one of two possible sentences, and then capture different
-bits of each sentence. 
-
-
-	$grammar = parse( 
-		a(  
-			['hello', c('world'), 'my', 'name', 'is', c(something)],
-			['howdy', c(something)]
-		) 
-	
-	);
-
-	ok($grammar->('hello world my name is Alice')==1, "1 match");
-
-	ok($c1 eq 'world', 'c1 is world');
-	ok($c2 eq 'Alice', 'c2 is alice');
-
-	ok($grammar->('howdy Bob')==1, "1 match");
-		
-	ok($c1 eq 'Bob', 'c1 is Bob');
-
-With the first string we parse, the first alternate matches, therefore
-the first "c" function is assigned to "$c1" and the second "c" function
-is assigned to "$c2". 
-
-With the second string we parse, the second alternate matches and 
-the c(something) function after 'howdy' is assigned to "$c1".
-The two "c" functions in the first alternate were not part of the 
-correct interpretation, and therefore were not used to count the
-numbered variables.
-
-=head2 get with modify
-
-The "get" function has a secondary mode when it is used with the "modify" 
-function: It can be used to do inline text substitution.
-
-The example below will look for "Alice" and replace it with "Bob".
-
-	my $text = "Hello Alice, how are you?";
-	$grammar=swap("Alice", sub{return "Bob"});
-	ok($grammar->($text), "match found");
-	ok($text eq "Hello Bob, how are you?", "substitution occurred");
-
-The above example could be done with less typing by using the "swap" function.
-The "swap" function is nothing more than the "modify" and "get" function 
-wrapped up for you to look more like perls regular expression syntax and 
-to reduce some of the typing you need to do.
-
-However, using "get" to do inline text replacement has it's advantage
-for more complicated grammars or patterns. Sometimes when you do a substitution,
-you need to make sure you have the correct text by looking for certain text
-before and after the pattern. But when you use this in a s/// regular expression,
-you have to capture the before and after text and put it into the replacement
-text as $1 and $2. 
-
-This is how you might look for two numbers separated by a plus character "+" 
-and replace it with a minus "-" character, using regular expressions:
-
-	my $text = "A+, 123+456, count++";
-	ok($text=~s{(\d+)\+(\d+)}{$1-$2}, "match found");
-	ok($text eq 'A+, 123-456, count++', "replacement took place");
-
-With Parse::Gnaw, you don't have to capture $1 and $2 and use it in the
-replacement string. Instead, you can use the "modify" function, define
-the pattern, and then use "get" to replace just the part you want,
-without using $1 and $2, and without capturing text before and after.
-
-	
-	my $text = "A+, 123+456, count++";
-	ok(modify(some(dgt),get(sub{return'-'},'+'),some(dgt))->($text), "match found");
-	ok($text eq 'A+, 123-456, count++', "replacement took place");
-
-=head2 now versus defer
-
-The "now" function allows you to define a subroutine to be called every time
-the parser hits that part of the grammar. The code subroutine will be called whether
-that part of the grammar eventually matches the text being parsed or not.
-
-The "defer" function allows you to define a subroutine to be called only if
-that branch of the grammar matches the text being parsed. The subroutine
-handed to the "defer" function is called at the end of parsing when a match occurs
-or when the "commit" function is called.
-
-This example uses the "now" function:
-
-	sub howdy { [ now(sub{print"trying howdy\n"}), 'howdy' ] }
-
-	sub hi    { [ now(sub{print"trying hi   \n"}), 'hi' ] }
-
-	$grammar = match(a(howdy, hi);
-
-	$grammar->("hi");
-
-The above example will print 
-
-	trying howdy
-	trying hi
-
-Even though the alternative "howdy" ended up failing.
-
-
-The next example uses the "defer" function instead:
-
-	sub howdy { [ defer(sub{print"trying howdy\n"}), 'howdy' ] }
-
-	sub hi    { [ defer(sub{print"trying hi   \n"}), 'hi' ] }
-
-	$grammar = match(a(howdy, hi);
-
-	$grammar->("hi");
-
-The above example with print only
-
-	trying hi
-
-Because "howdy" ended up failing, the defered subroutine for "howdy" did not get called.
-
-Because the "defer" function is more likely to be useful in more grammars, the short
-cut to do a "defer" function is to simply pass in a subroutine to any of the other 
-grammar functions. Any code reference will be assumed to be a "defer".
-
-Rewriting the "defer" example above but with the shorthand would look like this:
-
-	sub howdy { [ sub{print"trying howdy\n"}, 'howdy' ] }
-
-	sub hi    { [ sub{print"trying hi   \n"}, 'hi' ] }
-
-	$grammar = match(a(howdy, hi);
-
-	$grammar->("hi");
-
-As before, the above example with print only
-
-	trying hi
-
-
-The "defer" function is useful for doing things only when the parser knows it has
-a correct interpretation of the text being parsed. The "get" function is a "defer"
-function that has been wrapped.
-
-The "now" function is useful for doing something even if the interpretation might 
-fail later. One example is printing debug statements of a grammar to understand 
-where ther parser is going as it works through a piece of text. The "commit" function
-is a "now" function that has been wrapped with extra features.
-
-=head2 commit
-
-The "commit" function is used to commit the parser to a particular interpretation
-of a grammar. If the parser is working a grammar and applying it to a text,
-and the parser hits a "commit" function, then that path in the grammar must
-match. If the grammar fails to match after a "commit", rather than try any other 
-possible interpretations, the parser will quit with an error.
-
-The "commit" function will cause any currently scheduled "defer" functions 
-to be executed by the parser. The "commit" function can also trigger the
-text being parsed to be deleted up to the current character being parsed.
-
-Use "commit" if your grammar contains a reserved keyword and you want to force
-the parser to interpret the text as a keyword. Use the "commit" function if
-you are parsing a large chunk of text and you want to be able to remove the
-previous text from memory.
-
-	$grammar = match(some('keyword', commit, 'blah', 'blah', 'blah'));
-
-
-
-=head2 noskip
-
-By default, Parse::Gnaw skips whitespace in between literals and character classes.
-If you do not want to skip whitespace, use the "noskip" function. It will turn off
-skipping and look for all the grammar components to not have any extra whitespace 
-in them. 
-
-	$grammar = match('x', noskip('hello', 'world'), 'y');
-
-	# turn off skipping after x, no space between literals till skipping turned back on.
-	ok($grammar->('xhelloworld  y')==1, "1 match found");
-
-	# this doesn't match because of space between x and hello
-	ok($grammar->('x  helloworld  y')==0, "2 match not found");
-
-	# this doesn't match because of space between x and hello
-	ok($grammar->('xhello world  y')==0, "3 match not found");
-
-Note that the "noskip" takes effect immediately, so there is no skipping
-between the 'x' literal and the literal 'hello'.
-
-Also, note that "noskip" must enclose whatever grammar components you want it
-to be applied to. There is no way for a grammar to change the "skip" value
-for all components after it. You cannot do something like this:
-
-
-	$grammar = match(a( ['hello'], ['howdy',noskip] ), 'world' );
-
-In the example above, there are two alternates, 'hello' and 'howdy'. It would
-appear that in this grammar, if the alternate turns out to be 'howdy', that 
-the parser should not skip anything when it looks for 'world'. This attempts
-to have the "noskip" function effect the grammar outside of the "noskip" scope.
-The "noskip" function does not work that way. You must limit where the "noskip"
-function applies itself by putting those components inside the "noskip" function.
-
-If you really wanted either 'hello' skip 'world', or, 'howdy' noskip 'world', 
-you would have to unroll the code.
-
-	$grammar = match( a( ['hello','world'], ['howdy', noskip('world')] ));
-
-=head2 skipnow
-
-By default, Parse::Gnaw skips whitespace in between literals and character classes.
-So, why would you need an instruction to tell it to skip? When you are about to call
-"noskip".
-
-	sub name { some(wrd) }
-	$grammar = match( 'hello', name, '!' );
-	ok($grammar->("hello Alice !")==1, "expect match");
-	ok($grammar->("hello a b c d !")==1, "might not have expected this to match");
-
-In the above example, we use "some" to look for one or more "wrd" characters. We might
-use this to look for an identifier, a name, or similar. The problem is that the "wrd"
-function will "skip" whitespace every time it is called. Which means it will skip
-whitespace every time the "some" function calls it. Which means it will match the 
-string "a b c d", which might not be what we expected.
-
-To force the parser to not skip, we might try putting "noskip" around the "wrd" function.
-
-
-	sub name { [some(noskip(wrd))] }
-	$grammar = match( 'hello', name );
-	ok($grammar->("hello Alice")==0, "this won't match");
-	ok($grammar->("helloAlice")==1, "this will match");
-
-In the above example, we call "noskip" around the "wrd" function, but that means the
-parser will not skip the first time it enters the "some" function, which means it
-will not skip between "hello" and the first "wrd" character in the "some" function.
-So, the above grammar will only match "helloAlice" or similar situations.
-
-To overcome this, we need to be able to command the parser to skip right now. And
-then we need to put that skip right now function into the grammar just prior to 
-the "some" function. This will cause the parser to skip whitespace, and then look for 
-"some" "wrd" characters that are separated by no whitespace.
-
-	sub name { [skipnow, some(noskip(wrd))] }
-	$grammar = match( 'hello', name );
-	ok($grammar->("hello Alice")==0, "this won't match");
-	ok($grammar->("helloAlice")==1, "this will match");
-
-In the above example, we tell the parser to "skip" and then we look for some
-wrd characters. Note that "skip" will skip zero or more whitespace. This means
-we could also use "anyspace" as a synonym for "skip".
-
-
-=head2 id (identifier) function
-
-Because doing a series of "wrd" characters with no spaces in between them and
-word boundaries on both ends, with a "skip" function at the front is rather
-wordy, the "id" function has been provided for you.
-
-It takes one optional parameter, and if you provide one parameter, then the
-"id" function passes it into the "get" function for you.
-
-The declaration for "id" can be simplified to this:
-
-	sub id { 
-		if(scalar(@_)) {
-			my $getthingy=shift(@_);
-			return series(skip, bb, get($getthingy, some(noskip(wrd))), bb);
-		} else {
-			return series(skip, bb, some(noskip(wrd)), bb);
-		}
-	}
-
-You can use it to match but not capture:
-
-	$grammar = match('hello', id, '!');
-	ok($grammar->("hello Alice!")==1, "match");
-
-Or to match and capture
-
-	my $name='';
-	$grammar = match('hello', id(\$name), '!');
-	ok($grammar->("hello Alice!")==1, "match");
-	ok($name eq 'Alice', "check capture occurred");
-
-=head2 token
-
-The "token" function is if you want to define a series of items that are to occur
-with no skipping in between, but might have skipping before and after.
-
-Sort of like "id", but without the "bb" function on either end.
-
-If you wanted to define an operator that used more than one character, but you
-wanted to require that they not be separated by any spacing (but could allow
-spacing before and after), then you could use "token" to define that.
-
-Say you were looking for a digit followed by a letter, you could define it like this:
-
-	sub diglet { token(dgt, cc('a-zA-Z') }
-
-A simplified declaration for "token" might look like this:
-
-	sub token {  series( skipnow, noskip( @_ ) ) }
-
-It's not a very complicated function, but it summarizes the idea of a 'token'
-in parsing well, so it is provided for your convenience.
-
-
-
-
-
-
-
-=head2 positional markers
-
-=head2 bb
-
-=head2 BB
-
-The 'bb' and 'BB' functions are positional assertions. The 'bb' marker 
-is true if the the text being parsed contains a word boundary at that location.
-The 'BB' function is true if the text being parsed does NOT contain a
-word boundary at that location.
-
-A word boundary can occur under four different situations:
-
-	1) at a transition from a 'wrd' character to a 'WRD' character
-	2) at a transition from a 'WRD' character to a 'wrd' character
-	3) at the beginning of the string
-	4) at the end of the string
-
-The following grammar will only match text if it contains the literal 'alice'
-that contains word boundaries before and after the literal. i.e. something
-must separate 'alice' from the rest of the text.
-
-	$grammar = match(bb, 'alice', bb);
-
-	# beginning of string is a word boundary
-	ok($grammar->('alice bob charlie')==1, "match found"); 
-
-	# spaces are word boundaries
-	ok($grammar->('bob alice charlie')==1, "match found");
-
-	# end of string is a word boundary
-	ok($grammar->('bob charlie alice')==1, "match found");
-
-	# the '(' and ')' symbols are word boundaries
-	ok($grammar->('bob alice(42) charlie')==1, "match found");
-	ok($grammar->('bob (71)alice charlie')==1, "match found");
-
-	# 'bob' and 'charlie' are too close to 'alice', therefore 
-	# 'alice' is not separated before and after with word boundaries.
-	ok($grammar->('bob bobalice charlie')==0, "match not found");
-	ok($grammar->('bob alicecharlie charlie')==0, "match not found");
-	ok($grammar->('bob bobalicecharlie charlie')==0, "match not found");
-
-=head2 end function
-
-The "end" function is a positional assertion that matches only if the parser 
-has reached the end of the input text. Before testing for the end of input,
-the "end" function will execute the "skip" function, if any is currently active,
-so that it may skip over any content you deem ignorable. It then checks to see
-if it has reached the end of the input text. If it has, then it matches.
-
-If it doesn't, then it fails.
-
-Any grammar components after the "end" function will produce undefined behaviour,
-since nothing can be parsed after the end of the input text.
-
-If you want to see if some text, from beginning to end, matches your pattern,
-then use the "parse" function, and make the last grammar component the "end" 
-function. For example, this grammar will only match if the input text from
-beginning to end consists of one or more widgets (where "widgets" is defined
-by another subroutine of that name.):
-
-	$grammar = parse( some( widgets ), end );
-
-If you use the "match" function, it will start at the beginning but will skip
-ahead until it finds a match. If you omit the "end" function, any text that
-does not match will be ignored and the parsing will stop at the last matching
-widget. To confirm that the whole text is nothing but one or more widgets,
-use the above syntax.
-
-
-=head1 EXTENSIBLE
-
-Since the grammar components are built up as subroutines, it is possible
-to create your own grammar components as subroutines that call Parse::Gnaw
-subroutines and encapsulate some higher level functionality or provide
-shortcuts for you in your grammars.
-
-This means that you are not restricted to writing your grammars using only
-the low level components available in some parser language. If your grammar
-repeats the same complex pattern over and over, you can put that patten into
-a subroutine and call the subroutine wherever you need it.
-
-Note that this is better than a grammar that supports "rules", because 
-extensibility means you can pass other grammar components into your subroutine
-and manipulate them however you want before generating the final parsing logic.
-
-=head2 dgt, wrd, spc
-
-An simple example of extensibility is how the character class shortcuts 
-for digits and so on are extensions of the basic underlying "cc" and 
-"CC" functions, rather than being their own grammar component. Here is 
-how these shortcuts could be declared:
-
-	sub dgt { cc('0-9') }
-	sub DGT { CC('0-9') }
-
-	sub wrd { cc('a-zA-Z0-9_') }
-	sub WRD { CC('a-zA-Z0-9_') }
-
-	sub spc { cc("\n \t \r \f") }
-	sub SPC { CC("\n \t \r \f") }
-
-If you wanted to create even shorter versions of the above shortcuts, you 
-could declare them as subroutines in your own code and then call them
-in your grammar. For example, if you want to use the letter 'd' every time
-you want a digit character class, you could declare the following in your code:
-
-	sub d { dgt }
-
-=head2 qa
-
-Another example of a grammar extension is the "qa" function. The "a" function
-is a low level grammar component for alternations. The "qa" function is an 
-extension of "a". It's declaration looks like this:
-
-	sub qa {
-		my ($string)=@_;
-		my @words = __gnaw__separate_string_into_words($string);
-		my $stitcher = a(@words);
-		return $stitcher;
-	}
-
-The "qa" function takes in a single scalar string, splits that string up 
-into individual words based on whitespace, and creates an array of words.
-The "qa" function then passes this array of words into the "a" function and
-returns the stitcher that it creates.
-
-The "qa" function isn't something you can do in a normal parser "rule" because
-you're passing in a nonstandard parameter, preprocessing it, converting it to
-standard grammar building blocks, and then returning the parser code.
-
-=head2 any some anything something maybe
-
-Another example of extensions are the quantifier shortcut functions. 
-The low level components are the "thrifty" quantifier)
-and "thing" (any single character) components. From there, we declare the
-extensions:
-
-	sub any  { thrifty([0], @_) }		# zero or more
-	sub some { thrifty([1], @_) }		# one or more
-
-	sub anything  { any (thing) } 	# zero or more 'things'
-	sub something { some(thing) }	# one or more 'things'
-
-	sub maybe { g([0,1], @_) }
-
-The "any" and "some" functions are simple extensions of the "thrifty" function, 
-taking whatever parameters are passed into "any" and "some" and passing
-them directly onto the "thrifty" function. Instead of preprocessing the parameters
-like we did in the "qa" function, instead we hardcode some default values 
-for the quantifier "min" value. i.e. the [0] and [1] parts of the code
-passed into the "thrifty" function.
-
-=head2 slist
-
-The "slist" function is a more complex extension of basic 
-grammar components. The "slist" subroutine can be simplified
-to something like this:
-
-	sub slist {
-		my($item,$separator,$trailingseparatorallowed) = @_;
-		my $extension;
-
-		if($trailingsepatorallowed){
-			# an item, 
-			# followed by any number of (separator item) 
-			# and maybe one separator at end
-			$extension = series( $item,  any($separator, $item), maybe($separator) );
-		} else {
-			# an item, followed by any number of ( separator item ) 		
-			$extension = series( $item, any($separator, $item) );
-		}
-
-		return $extension;
-	}
-	
-The "slist" function is also not something that can be supported by normal 
-parser "rules". The "slist" subroutine is called during the "generation" 
-phase, before the parser is built, and based on the parameters passed in,
-it decides what sort of grammar to build for a separated list.
-
-=head2 az function
-
-The "az" function is a simple extension
-
-	sub az { parse( @_, end ) }
-
-It requires that the string being parsed matches from beginning to end the 
-pattern passed in.
-
-
-=head2 Making Your Own Extensions
-
-The process to making your own grammar extensions can be broken down into 
-a few steps:
-
-	1: deal with any pre-processed arguments passed in
-	2: deal with any remaining grammar arguments passed in
-	3: return a "stitcher"
-
-=head3 preprocessed arguments
-
-preprocessed arguments are arguments passed into your extension subroutine
-that do not translate directly into grammar components but instead are used
-by your subroutine in some way to decide what sort of component to generate.
-
-The "qa" (quoted alternation) function takes one preprocessed argument,
-a single string with space separated literals. It then breaks that string
-up into an array of literals that can then be passed into an existing
-grammar component function, the "a" function.
-
-If your extension has some preprocessed arguments, this is the first thing
-you want to deal with. Does your extension always receive a fixed number
-of preprocessed arguments? Do they always appear at the same position in
-the list of arguments (always first or always last or similar)? If so, then
-you might start by removing these preprocessed arguments from the @_ list.
-And potentially error checking them in some way, such as calling perls "ref"
-function on them to make sure they're not a "stitcher" or some other thingy.
-
-If you have a variable number of preprocessed arguments, or if they appear
-in different positions within the @_ parameter list, then you'll need
-some way of determining how many and where. Usually, the number of regular
-grammar components passed into any function is variable, so any pre-processed
-arguments are usually fixed to make them easier. However you could devise 
-alternative ways to distinguish your preprocessed arguments from the normal
-grammar component arguments. Since extensions are just perl subroutines,
-the method is up to you.
-
-Once the preprocessed arguments are removed from @_, process them however
-your extension needs to deal with them. Usually this entails passing them
-into some grammar component or another to generate a stitcher.
-
-In the "slist" function, we have two "preprocessed" arguments which are
-the "item" and the "separator". Because we want to allow the item and 
-separator to be any number of grammar components, we force the number
-of paramters allowed to exactly two, and then require the user to 
-group multiple components into array references. 
-
-The "slist" function then passes the "item" and "separator" pieces
-directly into other existing components.
-
-=head3 remaining grammar arguments
-
-If your extension passes in normal grammar components, such as literal
-strings, or arrays of literal strings, or functions such as "a" or "bb" 
-or whatever, then if possible, pass these items directly into whatever
-existing grammar function provides the behaviour pattern you want.
-
-If you want the arguments to be processed in a series, then pass them
-into the "series" function, which will process them as if they were 
-normal parts of some grammar and return a "stitcher" function.
-
-Since you removed any preprocessed arguments from the @_ array, your 
-extension should be able to pass the remaining @_ array into whatever
-lower level functional components you want.
-
-For example, the "some" function is a shortcut to the "thrifty"
-function, forcing the quantity to be "1 or more". You can pass any
-number of grammar components into the "some" function. The "some"
-function simply passes them all directly into the "thrifty" function.
-
-	sub some { thrifty([1], @_) }
-
-The "az" function is an extension that wraps the "parse" function,
-assumes everything passed in is a grammar component and adds the
-"end" function to the end of the pattern.
-
-	sub az { parse( @_, end ) }
-
-=head3 return a stitcher
-
-Most extensions operate as low level grammar components and need to 
-return a "stitcher" so that the return value of the extension can
-be used inside a larger grammar. You can use the "some" extension
-inside a larger grammar and not even know it is an extension because
-it returns a stitcher just like any other low level component.
-
-In the case of the "some" function, the stitcher is created by the 
-"thrifty" function, and since it is the last expression of the "some" 
-subroutine, the return value of the "thrifty" function is the return 
-value of the "some" function. Therefore the "some" extension 
-returns a stitcher without any explicit return call.
-
-	sub some { g([1], @_) }
-
-The "slist" extension generates one of two possible subgrammars
-and returns the stitcher for that component. It was coded with
-an explicit return just so that there is only one return in the
-subroutine.
-
-	sub slist {
-		my($item,$separator,$trailingseparatorallowed) = @_;
-		my $extension;
-
-		if($trailingsepatorallowed){
-			# an item, 
-			# followed by any number of (separator item) 
-			# and maybe one separator at end
-			$extension = series( $item,  any($separator, $item), maybe($separator) );
-		} else {
-			# an item, followed by any number of ( separator item ) 		
-			$extension = series( $item, any($separator, $item) );
-		}
-
-		return $extension;
-	}
-
-The "slist" function uses the "series" function to generate a stitcher, and 
-then the "slist" function returns that stitcher. The series function is explained
-in more detail below.
-
-You don't have to return a stitcher if your extension is intended to 
-operate as a top level function. The "az" function is an extension that
-operates as a top level function wrapping the "parse" function. Just remember
-that top level functions return coderefs that act as the parser when
-you dereference them. Top level functions cannot be part of a larger grammar.
-
-If you don't return a stitcher, about the only other thing you can return
-is a top level code reference.
-
-=head3 series function
-
-The "series" function is a low level function in Parse::Gnaw that takes any
-number of grammar components, literals, array references of grammar components,
-and so on, and creates a single subgrammar that expects all those components
-to occur in one long series.
-
-You don't have to use the "series" function in your normal grammars because 
-all the other functions use it for you. For example the "match" function takes
-any number of input parameters and passes them into the "series" function,
-it then uses that stitcher to create the "match" function.
-
-If you're creating a grammar extension, however, you might want to explicitely
-call the "series" function to put several grammar components together into
-a sequence and generate a single stitcher.
-
-The "slist" extension is an example of an extension that uses the "series"
-function to generate the stitcher.
-
-=head3 trekism extension explained
-
-The trekisms grammar, shown elsewhere in this document, contains an
-interesting grammar extension. It doesn't really look like a grammar 
-extension so much as it looks like a nice way to bundle some funcitonality
-that gets reused throughout the grammar.
-
-The grammar identifies a number of bits of dialogue and assumes certain
-characters say those lines of dialogue. The grammar then prints out the
-name of the character along with the line they said. 
-
-Since this function is done in the grammar at multiple locations, but 
-for different character names, normal grammars would have to execute
-this functionality as some sort of "action" or defered callback or somehting
-and then figure out a way to capture the line of dialoge as well as
-figure out a way to pass in different character names for each instance.
-
-In the case of Parse::Gnaw, we simply make an extension.  Here is the
-entire code for the extension subroutine:
-
-	sub attributeline { 
-		my $character_name=shift(@_);
-		my @lines_of_dialogue_for_this_character = @_;
-		my $callback = sub{$captured.=sprintf ("%8s says: %s\n", $character_name,shift(@_));};
-		my $stitcher = get($callback, a(@lines_of_dialogue_for_this_character));
-		return $stitcher;
-	}
-
-The "attributeline" extension takes one preprocessed argument, a string 
-that is the name of the character for this instance.
-The remaining arguments are each treated as unique lines of dialogue
-that the character might say.
-
-It takes the character name and creates a callback for a "get" function.
-The callback takes the name, the line of dialogue handed to it by "get",
-creates a pretty-formatted string, and then appends it to the end of a
-"captured" variable.
-
-The extension then creates a stitcher that is nothing more than
-the "get" function, the callback, and the lines of dialogue 
-handed into the "a" function, treating each line as a valid
-altenate for that character.
-
-By passing the @lines of dialogue into "a", we get alternates
-that we can pass into "get". By passing it into the "get" 
-function, our callback has the line of dialogue available to put
-into a formatted version. By passing the "name" variable into 
-the callback, the callback becomes a closure and remembers the
-"name" variable so it can be sent out when the callback is
-called by the "get" function.
-
-See the "trekisms" grammar in the examples below:
-
-=head1 FULL GRAMMAR EXAMPLES
-
-=head2 trekisms
-
-The following grammar shows how one might identify dialogue and 
-attribute it to a particular fictional character. 
-
-The "attributeline" subroutine is basically an extension which allows 
-us to bundle the functionality of the output into one spot and then 
-easily use that functionality at several different points in the grammar.
-
-	my $captured="";
-
-	sub attributeline { 
-		my $character_name=shift(@_);
-		my @lines_of_dialogue_for_this_character = @_;
-		my $callback = sub{$captured.=sprintf ("%8s says: %s\n", $character_name,shift(@_));};
-		my $stitcher = get($callback, a(@lines_of_dialogue_for_this_character));
-		return $stitcher;
-	}
-
-	sub trekname { qa('Jim Captain Spock Bones Doctor Scotty') } 
-	sub occupation {a('ditch digger', 'bricklayer', 'mechanic')}
-	sub mccoy_job { [ql("I'm a doctor, not a"), occupation, a('!', '.')] }
-	sub mccoy_diag { [ "He's", 'dead', ',', trekname, a('!', '.') ] }
-	sub mccoy_rant1 { [ql('You green-blooded Vulcan'), a('!', '.') ] }
-	sub mccoy_isms {
-		attributeline('McCoy', mccoy_job, mccoy_diag, mccoy_rant1) 
-	}
-
-	sub spock_awe {['Fascinating', ',', trekname, '.']}
-	sub spock_logic {['Highly', 'illogical',',', trekname, '.']}
-	sub spock_sensors { [ql("It's life ,"), trekname, ql(', but not as we know it .')]}
-	sub spock_isms {
-		attributeline('Spock', spock_awe, spock_logic, spock_sensors)
-	}
-	
-	sub kirk_dipolomacy1 {ql('We come in peace .')}
-	sub kirk_dipolomacy2 {ql('Shoot to kill .')}
-	sub kirk_to_scotty {ql('I need warp speed now , Scotty !')}
-	sub kirk_to_spock {ql('What is it , Spock ?')}
-	sub kirk_to_bones {ql('Just fix him , Bones')}
-	sub kirk_solution {ql('Activate ship self-destruct mechanism .')}
-	sub kirk_isms {
-		attributeline('Kirk', 
-			kirk_dipolomacy1, 
-			kirk_dipolomacy2,
-			kirk_to_scotty,
-			kirk_to_spock,	
-			kirk_to_bones,	
-			kirk_solution
-		)
-	}
-
-	sub scotty_phy101 {ql('Ya kenna change the laws of physics .')}
-	sub time_units {qa('minutes hours days weeks')}
-	sub scotty_estimate {[ ql("I'll have it ready for you in three"), time_units, '.' ]}
-	
-	sub scotty_isms {attributeline('Scotty', scotty_phy101, scotty_estimate)}
-	
-	
-	sub alien_isms {attributeline('alien', 'weeboo')}
-	
-	
-	sub trek_isms {a(mccoy_isms, spock_isms, kirk_isms, scotty_isms, alien_isms )}
-	sub trek_script {some(trek_isms), end}	
-	
-	$grammar = parse(  trek_script );
-		
-	my $script = <<'SCRIPT';
-	What is it, Spock?
-	It's life, Jim, but not as we know it.
-	We come in peace.
-	weeboo
-	Shoot to kill.
-	weeboo
-	I need warp speed now, Scotty!
-	I'll have it ready for you in three minutes.
-	weeboo
-	I need warp speed now, Scotty!
-	Ya kenna change the laws of physics.	
-	weeboo
-	weeboo
-	Shoot to kill.
-	Shoot to kill.
-	I'm a doctor, not a bricklayer.
-	Highly illogical, Doctor.
-	You green-blooded Vulcan.
-	Shoot to kill.
-	Shoot to kill.
-	He's dead, Jim.
-	Activate ship self-destruct mechanism.
-	Highly illogical, Captain.
-	SCRIPT
-	;
-
-	#print "script is '$script'\n";
-
-	ok($grammar->( $script )==1, "1 match");
-
-	my $expected =  <<'EXPECTED';
-	    Kirk says: What is it, Spock?
-	   Spock says: It's life, Jim, but not as we know it.
-	    Kirk says: We come in peace.
-	   alien says: weeboo
-	    Kirk says: Shoot to kill.
-	   alien says: weeboo
-	    Kirk says: I need warp speed now, Scotty!
-	  Scotty says: I'll have it ready for you in three minutes.
-	   alien says: weeboo
-	    Kirk says: I need warp speed now, Scotty!
-	  Scotty says: Ya kenna change the laws of physics.
-	   alien says: weeboo
-	   alien says: weeboo
-	    Kirk says: Shoot to kill.
-	    Kirk says: Shoot to kill.
-	   McCoy says: I'm a doctor, not a bricklayer.
-	   Spock says: Highly illogical, Doctor.
-	   McCoy says: You green-blooded Vulcan.
-	    Kirk says: Shoot to kill.
-	    Kirk says: Shoot to kill.
-	   McCoy says: He's dead, Jim.
-	    Kirk says: Activate ship self-destruct mechanism.
-	   Spock says: Highly illogical, Captain.
-	EXPECTED
-	;
-	
-		
-	
-	ok($captured eq $expected, "checking captured string matches expected");
-
-The above example is included as a test in the t directory of the tarball from CPAN.
-
-Note that when we call the "attributeline" extension, we pass in a string that 
-isn't part of the grammar to be searched for in the text, it is part of the
-text output. In the line below, we call "attributeline('McCoy', ...)", 
-but we aren't looking for "McCoy" in the text being parsed, we pass in "McCoy"
-so we can use that string in the formatted output.
-
-	sub mccoy_isms {
-		attributeline('McCoy', mccoy_job, mccoy_diag, mccoy_rant1) 
-	}
-
-See the section on "extensions" for more details.
-
-=head1 HOOKS FOR STREAMS
-
-By default, the Parse::Gnaw module works similar to perl regular expressions.
-It works on the text in memory and loads the entire text when the top level
-function callback is called and passed a string to parse.
-
-However, the Parse::Gnaw module was designed from the ground up to work with 
-partial texts, to work with a subset of an entire piece of text, and pull 
-into memory only what it needed, and flush out of memory any text that it 
-was finished parsing.
-
-Theoretically, Parse::Gnaw should be able to parse an infinite amount of text
-as long as the grammar defines rules that only need a finite chunk that will 
-fit in memory to find a match.
-
-To support this feature, Parse::Gnaw has some hooks that allow you to modify
-its default behaviour so that it only needs to operate on a subset of the
-entire text at a time.
-
-These functions, including the "commit" function, are defined in this section. 
-
-=head2 commit
-
-The "commit" function is a lower level grammar component function that you 
-put into your grammar to define points in the grammar where the parser can
-commit to the current interpretation because no other interpretation is
-possible.
-
-Normally, the parser will not commit to an interpretation until it has 
-reached the very last component in the grammar. The "commit" function allows
-you to force the parser to commit to the current interpretation.
-
-This helps parse streams because the "commit" function means that the parser
-will commit any text parsed so far, call any callbacks on that text, and then
-flush the text from memory.
-
-=head2 flush
-
-After the "commit" function calls any callbacks on the text parsed so far,
-the parser calls the "flush" function.
-
-	our $__gnaw__flush = undef;
-
-By default, it is undef, which means any committed text is ignored and
-simply deleted from memory after the "commit" function is called.
-This might be the functionality you want if you are doing a read-only
-parse of a block of text.
-
-However, if you are parsing a file, modifying, and want to save the modifications,
-then you can define $__gnaw__flush to point to a subroutine reference which 
-will write the results to a harddrive or some external device.
-
-If you want a basic append-to-file function, you can call the followng function
-and pass it the filename:
-
-	__gnaw__flushed_text_is_appended_to_file( 'filename' );
-
-The function will return the filehandle of the file being appended to.
-You can ignore it if you want or you can use the filehandle to force
-the file be closed in the middle of your script execution so you can 
-open another file.
-
-=head2 sip
-
-At the input side, we need a mechanism for reading a little bit of text 
-from some external source as we need it. This is handled by the "sip" function.
-
-	our $__gnaw__sip = sub{};
-
-Whenever the Parse::Gnaw code hits the end of the text in memory, it will 
-call the code reference in $__gnaw__sip. If this callback wants to add
-text to the linked list in memory, it can get the text it wants to add
-and call the __gnaw__insert_string_at_end_of_linked_list() function, 
-passing the new text to that subroutine.
-
-The amount of text you add to the end of the linked list is up to you.
-If the parser hits the end of text in memory, it will simply call the
-$__gnaw__sip function again.
-
-When your $__gnaw__sip function has reached the end of its input source
-file(s), you will want your subroutine to handle further calls to it by
-doing nothing and returning immediately.
-
-By default, the $__gnaw__sip subref is set to a subroutine reference that
-doesn't do anything. This is because the default behaviour of Parse::Gnaw
-is to process the entire text being parsed in memory.
-
-
-
-=head1 NOT IMPLEMENTED YET
-
-
-=head2 matchall swapall
-
-The match and swap functions only operate on the first instance 
-in the string that matches. 
-
-If you want to match, and then keep going, or if you want to 
-swap something and keep going, use the matchall and swapall
-function.
-
-=head2 recursive
-
-The "recursive" function has not been implemented yet.
-
-If you define a grammar which is recursive, you must
-wrap the recursive call in the "recursive" function. 
-
-If you declare a recursive grammar without using a 
-"recursive" function, then perl will recursively call 
-the subroutine until it dies a horrible death.
-
-	sub expression;
-	sub expression{ a([ '(' expression ')'], 'a+b') }
-
-	# this call to "expression" will recursively call itself
-	# until perl crashes.
-	my $grammar = match(expression); 
-
-The above example will crash. Note that it crashes during the
-"generate" stage of creating the grammar. The grammar isnt
-even being used to try to match a string yet. The mere act of 
-declaring a recursive grammar without the "recursive" function will
-cause a crash.
-
-What you need to do is wrap any recursive call to a rule in
-the "recursive" function.
-
-	sub expression;
-	sub expression{ a([ '(' recursive(\&expression) ')'], 'a+b') }
-
-	my $grammar = match(expression);
-
-
-=head1 INTERNALS
-
-These are notes to developers who may need to understand how
-the internals of Parse::Gnaw operate so they can create 
-advanced grammars.
-
-Also, these are notes to myself to remember how things function.
-
-=head2 Text being parsed.
-
-The text being parsed is held internally in a linked list. 
-This allows Parse::Gnaw to operate on a small subset of the 
-entire string being parsed. Theoretically, Parse::Gnaw can 
-parse an infinite amount of text as long as it can be 
-parsed in chunks small enough that the rules can disambiguate 
-text that fits in memory.
-
-Each element in the linked list is an array. 
-
-Array stores the following data: 
-
-	0: numeric indicator of what type of element this is
-	1: payload
-	2: previous element pointer
-	3: next element pointer
-	4: used for debugging
-
-There are several "types" of elements as indicated by the
-value in index 0 of an element:
-
-	0: element has been deleted. If code tries to use 
-		a deleted element, this should act as a 
-		flag that something went wrong
-	1: element holds a single text character. 
-		letter is stored in payload index.
-	2: element holds a "marker". Markers are placed between
-		text elements by the parser to keep track of
-		where it is in the code, where captured strings
-		are located, where to fallback to in the text
-		if a particular branch of a parse fails, etc.
-		A marker contains no payload.
-	3: element contains a callback to be executed on
-		successful completion of parsing or a commit.
-		Payload contains code ref to callback.
-	4: element is a head/tail endpoint
-		These two elements are never to be deleted.
-	5: word boundary markers inserted by "sip".
-		These might indicate transition from one file to another.
-		Note that normally moving text pointer forward by one
-		will delete all old markers, but it won't delete these markers.
-
-The linked list starts and ends with two signpost elements:
-'head' and 'tail'. No text is ever stored in these signpost
-elements. Any text being parsed is always contained between
-these two signpost elements.
-
-The 'current' pointer always points to the text that is about
-to be processed.
-
-When the __gnaw__parse_failed function is called, it will
-pop the last fallback position off the fallback array, 
-which will change the next instruction to be executed and
-will also move the text pointer back to teh fallback marker.
-The last thing the __gnaw__parse_failed function does is
-delete the fallback marker and any other elements in the
-text linked list that are not text.
-
-When any instruction moves the text pointer forward, it
-will also delete any old markers it encounters.
-
-The current pointer may point to the tail signpost element.
-This may mean that we are at the end of the string, or it
-may mean that the next time we try to get the current letter
-that we need to insert more text from a file or something.
-
-All interfaces to the linked list should be through the 
-subroutines designed for working with the linked list.
-These start with the prefix "__gnaw__" to help prevent
-subroutine colisions.
-
-All parse level commands should manipulate text based on markers.
-
-No user-level or grammar-level commands are currently supported.
-You can always call the __gnaw__* functions, but they are
-currently subject to change.
-
-=head2 Generating the Parser
-
-tbd
-
-
-
-=head1 AUTHOR
 
 Greg London, C<< <email at greglondon.com> >>
 
 =head1 BUGS
 
-Please report any bugs or feature requests to C<bug-parse-gnaw at rt.cpan.org>, or through
-the web interface at L<http://rt.cpan.org/NoAuth/ReportBug.html?Queue=Parse-Gnaw>.  I will be notified, and then you will
+Please report any bugs or feature requests to C<bug-parse-Gnaw at rt.cpan.org>, or through
+the web interface at L<http://rt.cpan.org/NoAuth/ReportBug.html?Queue=Parse-Gnaw>.  I will be notified, and then you'll
 automatically be notified of progress on your bug as I make changes.
 
 
@@ -2087,7 +514,7 @@ You can also look for information at:
 
 =over 4
 
-=item * RT: CPANs request tracker
+=item * RT: CPAN's request tracker (report bugs here)
 
 L<http://rt.cpan.org/NoAuth/Bugs.html?Dist=Parse-Gnaw>
 
@@ -2101,7 +528,7 @@ L<http://cpanratings.perl.org/d/Parse-Gnaw>
 
 =item * Search CPAN
 
-L<http://search.cpan.org/dist/Parse-Gnaw>
+L<http://search.cpan.org/dist/Parse-Gnaw/>
 
 =back
 
@@ -2109,12 +536,47 @@ L<http://search.cpan.org/dist/Parse-Gnaw>
 =head1 ACKNOWLEDGEMENTS
 
 
-=head1 COPYRIGHT & LICENSE
+=head1 LICENSE AND COPYRIGHT
 
-Copyright 2008 Greg London, all rights reserved.
+Copyright 2013 Greg London.
 
 This program is free software; you can redistribute it and/or modify it
-under the same terms as Perl itself.
+under the terms of the the Artistic License (2.0). You may obtain a
+copy of the full license at:
+
+L<http://www.perlfoundation.org/artistic_license_2_0>
+
+Any use, modification, and distribution of the Standard or Modified
+Versions is governed by this Artistic License. By using, modifying or
+distributing the Package, you accept this license. Do not use, modify,
+or distribute the Package, if you do not accept this license.
+
+If your Modified Version has been derived from a Modified Version made
+by someone other than you, you are nevertheless required to ensure that
+your Modified Version complies with the requirements of this license.
+
+This license does not grant you the right to use any trademark, service
+mark, tradename, or logo of the Copyright Holder.
+
+This license includes the non-exclusive, worldwide, free-of-charge
+patent license to make, have made, use, offer to sell, sell, import and
+otherwise transfer the Package with respect to any patent claims
+licensable by the Copyright Holder that are necessarily infringed by the
+Package. If you institute patent litigation (including a cross-claim or
+counterclaim) against any party alleging that the Package constitutes
+direct or contributory patent infringement, then this Artistic License
+to you shall terminate on the date that such litigation is filed.
+
+Disclaimer of Warranty: THE PACKAGE IS PROVIDED BY THE COPYRIGHT HOLDER
+AND CONTRIBUTORS "AS IS' AND WITHOUT ANY EXPRESS OR IMPLIED WARRANTIES.
+THE IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
+PURPOSE, OR NON-INFRINGEMENT ARE DISCLAIMED TO THE EXTENT PERMITTED BY
+YOUR LOCAL LAW. UNLESS REQUIRED BY LAW, NO COPYRIGHT HOLDER OR
+CONTRIBUTOR WILL BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, OR
+CONSEQUENTIAL DAMAGES ARISING IN ANY WAY OUT OF THE USE OF THE PACKAGE,
+EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
 =cut
+
+1; # End of Parse::Gnaw
