@@ -539,16 +539,9 @@ sub parse{
 	my @grammarcopy=@$grammarref;		# make a shallow copy of rule.
 	my $grammarcopyref=\@grammarcopy;	# this is a reference to copy of rule
 
-
-	my $firstletter= $llobj->[LIST__FIRST_START];
-	my $currletter = $llobj->[LIST__CURR_START];
-
-	if($currletter eq $firstletter){
-		$currletter=$currletter->[LETTER__NEXT_START];
-		$llobj->[LIST__CURR_START]=$currletter;
-	}
-
-	$currletter->[LETTER__LETTER_HAS_BEEN_CONSUMED]=0;
+	# the "parse" function always starts from the very beginning of the string.
+	# so first thing we need to do is reset the current-pointer 
+	$llobj->[LIST__CURR_START] =  $llobj->[LIST__FIRST_START]->[LETTER__NEXT_START];
 
 	my $save_start = $llobj->[LIST__CURR_START];
 

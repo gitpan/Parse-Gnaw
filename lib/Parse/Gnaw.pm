@@ -11,7 +11,7 @@ use Data::Dumper;
 use Carp ('cluck','confess');
 use Storable qw(nstore dclone retrieve);
 
-our $VERSION = '0.600';
+our $VERSION = '0.601';
 
 # this package doesn't play nice.
 # it uses eval("") to create variables in the caller's namespace.
@@ -20,7 +20,7 @@ our $VERSION = '0.600';
 #
 # to disable that warning, we need to do a 
 # no warnings 'once';
-# except that's lexical and we can't do that here so that every caller gets it automatically.
+# except that's lexical and we can't do that here 
 #
 # on the other hand, if we have an import function and from import call this:
 #	warnings->unimport("once");
@@ -48,7 +48,7 @@ our $VERSION = '0.600';
 
 
 our @ISA = qw(Exporter);
-our @EXPORT = qw ( rule predeclare lit call cc notcc thrifty );
+our @EXPORT = qw ( rule predeclare lit call cc notcc thrifty alt );
 
 sub import {
 	warnings->unimport("once");
@@ -182,6 +182,8 @@ sub get_ref_to_rulename{
 
 
 sub process_first_arguments_and_return_hash_ref{
+
+	#print Dumper \@_; warn "process_first_arguments_and_return_hash_ref arguments (above)";
 
 
 	# first parameter string is same as payload=> key in hash
@@ -732,7 +734,43 @@ sub notcc{
 
 
 
-	
+my $alternatecounter=0;
+
+# alt( [ 'a','b'], ['c','d'], ['e','f'] );
+sub alt{
+	my $argref=['alternates', @_];
+
+	my $info_href=process_first_arguments_and_return_hash_ref('alt',  $argref);
+	if($debug){print "called alternation ";print Dumper $info_href; warn " ";}
+
+	$info_href->{alternates}=[];
+
+	while(@$argref){
+	 
+		my $arr_ref=shift(@$argref);
+
+		# should pass in a list of array refs. turn each one into a rule.
+		unless(ref($arr_ref) eq 'ARRAY'){
+			confess "ERROR: alternate should be passed a list of array references, each containing an alternate rule description. got '$arr_ref' instead";
+		}
+
+		my $alternate_rule_name = "alternate_".(++$alternatecounter);
+			
+		push(@{$info_href->{alternates}}, $alternate_rule_name);
+
+		# create a new rule and put the quantify stuff in it.
+		rule($alternate_rule_name, @$arr_ref);
+
+
+	}
+
+
+	my $retval = ['alt', 'alternates', $info_href ];
+
+	print Dumper $retval;
+
+	return $retval;
+}
 
 
 

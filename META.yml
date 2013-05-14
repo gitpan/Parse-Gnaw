@@ -4,6 +4,7 @@ author:
   - 'Greg London <email@greglondon.com>'
 build_requires:
   Test::More: 0
+  Test::Warn: 0
 configure_requires:
   ExtUtils::MakeMaker: 0
 dynamic_config: 1
@@ -19,4 +20,4 @@ no_index:
     - inc
 requires:
   perl: 5.006
-version: 0.600
+version: 0.601
